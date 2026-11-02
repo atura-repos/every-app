@@ -155,10 +155,7 @@ it("does not show another user's cached links while switching users or revalidat
       </QueryClientProvider>,
     ),
   );
-  await act(async () => {
-    await tick();
-  });
-  expect(container.textContent).toBe("Public");
+  await expectText("Public");
 });
 
 it("hides links while a cached session is being revalidated for a user switch", async () => {
