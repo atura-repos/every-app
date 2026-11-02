@@ -21,8 +21,15 @@ export const Route = createFileRoute("/_app/admin/external-links")({
 });
 
 function ExternalLinksAdmin() {
-  const { data: session } = useSession();
+  const {
+    data: session,
+    isFetchedAfterMount,
+    isFetching: sessionFetching,
+    error: sessionError,
+  } = useSession();
   const orgId = session?.session.activeOrganizationId;
+  const userId = session?.user.id;
+  const validated = isFetchedAfterMount && !sessionFetching && !sessionError;
   const { data: links, isPending, isError, refetch } = useExternalLinks();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<string | null>(null);
@@ -33,14 +40,21 @@ function ExternalLinksAdmin() {
   const [userIds, setUserIds] = useState<string[]>([]);
   const [groupIds, setGroupIds] = useState<string[]>([]);
   const {
-    data: choices,
+    data: cachedChoices,
+    isFetchedAfterMount: choicesFetchedAfterMount,
+    isFetching: choicesFetching,
     isError: choicesError,
     refetch: retryChoices,
   } = useQuery({
-    queryKey: ["external-link-access-options", orgId],
-    enabled: Boolean(orgId),
+    queryKey: ["external-link-access-options", orgId, userId],
+    enabled: Boolean(orgId && userId && validated),
+    meta: { persist: false },
     queryFn: () => externalLinkAccessOptions(),
   });
+  const choices =
+    validated && choicesFetchedAfterMount && !choicesFetching && !choicesError
+      ? cachedChoices
+      : undefined;
   const clear = () => {
     setEditing(null);
     setName("");
