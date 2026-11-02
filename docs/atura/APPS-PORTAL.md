@@ -1,0 +1,38 @@
+# Atura Apps Portal — ontwerp en uitrol
+
+Dit document beschrijft Atura's beheer van de EveryApp-fork als catalogus voor interne apps. De gecontroleerde algemene releaseprocedure staat in [OPERATIONS.md](OPERATIONS.md). Wijzigingen gaan via Atura-PR, staging en een gescheiden productierelease. Het project behoudt de upstream MIT-licentie en copyright.
+
+## Grenzen
+
+- **Beheerde apps** zijn EveryApp-deployments met Gateway-toegangsrechten, gebruikers en groepen. Een 'available to everyone'-app is voor alle actieve leden zichtbaar; een beperkte app vereist expliciete grants.
+- **Organisatie-externe links** zijn catalogusitems naar zelfstandig beheerde HTTPS-bestemmingen. Gateway-rechten filteren de catalogus server-side, maar beveiligen de bestemming **niet** tegen rechtstreeks openen. De zelfstandige risicobeoordelings-Worker en zijn eigen Entra-login, bindings en data blijven intact. De bestaande productielink blijft uitdrukkelijk als **ontwikkeling** gelabeld.
+- **Persoonlijke links en indeling** zijn privé per Gateway-gebruiker én workspace. Apprechten worden vóór persoonlijke sortering toegepast. Een gepinde of eerder zichtbare app mag na intrekking niet via voorkeuren terugkomen.
+- Cloudflare Access + Entra levert identiteit aan de Gateway; de Gateway beslist over lidmaatschap en apprechten. Entra-groepen synchroniseren **niet** automatisch met Gateway-groepen. Hermes, Claude Code en Codex zijn ontwikkelgereedschap; hun abonnementsrechten worden niet via de portal gedeeld.
+
+## Gefaseerd acceptatieplan
+
+1. **Identiteit:** een uitsluitend voor de portal gemaakte, tenantgebonden Entra-app met minimale OpenID-scopes, voor de pilot alleen toegewezen aan `mvanfalier@atura.nl`; Access laat de Entra-IdP als *extra* methode toe op Gateway- en wildcard-apphost. Behoud bestaande One-time PIN, Cloudflare-provider, owners en wachtwoordherstel. Controleer een echte Mikkie-login en Gateway-membership apart van de Access-redirect.
+2. **Externe-link-ACL:** maak alle bestaande organisatielinks standaard zichtbaar voor huidige actieve leden; nieuwe beperkte links krijgen expliciete gebruiker- of Gateway-groepsgrants. Controleer organisatie-isolatie, inactieve leden, groepsverwijdering en intrekking met negatieve integratietests. Cache gebruikersspecifieke resultaten niet persistent of over accounts heen.
+3. **Persoonlijke inrichting:** HTTPS-links, pins, appvolgorde en raster/lijst accountgebonden opslaan. Importeer uitsluitend voorkeuren uit dezelfde browser voor het overeenkomende account/workspace en één keer. Test snelle opeenvolgende wijzigingen, apprecht-intrekking en weergave op een tweede browser.
+4. **Levering:** review en volledige CI op de exacte PR-head. Maak unieke opeenvolgende Drizzle-SQL/journal/snapshotmigraties; test de **gecombineerde** migratiereeks van `0023` naar de laatste versie op een kopie van de Gateway-database. Publiceer daarna een onveranderlijke Atura-tag, controleer checksum/manifest `gitSha`, en rol eerst de URL van de Atura-release uit naar staging. Test daarna met Mikkie de echte UI en de dev-risicolink.
+5. **Productie:** nieuwe privé-D1-export met importtest, Time Travel-bookmark en oude Worker-versie vastleggen; Access en ledenstatus vooraf lezen. Pas na geslaagde stagingacceptatie de exacte gecontroleerde release-URL toe. Controleer Worker-versie, migraties, Access, owner, Mikkie-login, link, persoonlijke voorkeuren en apprechten opnieuw. D1 Time Travel terugzetten verliest alle latere writes; dit vereist een afzonderlijke verliesanalyse en toestemming. Een Worker-rollback alleen keert een schemawijziging niet terug.
+
+## Onboarding van een collega (na de Mikkie-pilot)
+
+1. Bevestig met de collega het exacte Entra-UPN en het geverifieerde mailadres; zorg dat het in de juiste tenant staat en wijs de enterprise-app voor deze portal alleen aan de bedoelde gebruiker toe. Controleer eigen MFA/Conditional Access, zonder tenantbreed beleid te versoepelen.
+2. Laat de Gateway-owner/admin in **Manage workspace → Users** een uitnodiging voor precies dat adres maken (of richt eerst een geverifieerde Gateway-invitatiemail in). Een uitgenodigd adres kan via Access met hetzelfde adres aanmelden; deel een eventuele eenmalige uitnodigingslink uitsluitend via een veilig kanaal, nooit in een chatlog. De CLI-weergave `workspace invite` kan onder een operatoraccount `WORKSPACE_NOT_A_MEMBER` weigeren: gebruik niet blind een API-token als een Gateway-lid.
+3. Voeg het exacte adres aan de betreffende Cloudflare Access allow-policy toe (`pnpm everyapp access on --email <adres>` voegt toe maar verwijdert nooit). Verifieer dat **beide** Access-applicaties de gewenste provider toestaan. Zet geen breed `--email-domain` of blijvende Gateway-auto-join aan.
+4. Laat de collega eenmalig via Entra aanmelden, verifieer het Gateway-lidmaatschap en ken daarna uitsluitend de benodigde beheerde-apprechten en externe-linkgrants toe, direct of via een handmatig beheerde Gateway-groep. Test de bedoelde app en bevestig dat de niet-toegestane app ontbreekt. Beveilig de externe bestemming ook afzonderlijk.
+
+## Offboarding / toegangsintrekking
+
+1. Deactiveer het Gateway-lid in **Manage workspace → Users**; daarmee worden Gateway-sessies, persoonlijke tokens en AI-verbindingen ongeldig. Controleer dat het lid inactief is en dat app- en linkgrants niet meer bruikbaar zijn. Verwijder groepslidmaatschappen en eventuele resterende grants volgens bewaarbeleid.
+2. Verwijder de exacte emailregel uit de **relevante** Cloudflare Access policy en beëindig Access-sessies; `access on` kan dit niet omdat het uitsluitend toevoegt. Trek de enterprise-appassignment in Entra in en behandel eventuele overige tenanttoegang onder het reguliere HR/IAM-proces. Deactiveer de juiste gebruiker; raak de bestaande owner/break-glass niet aan.
+3. Trek toegang bij **elke zelfstandige doelapp** apart in. Een verborgen portallink en een ingetrokken Gateway-lid blokkeren niet noodzakelijk de directe URL. Verifieer toegangsweigering in Gateway en doelapp. Geen automatische Entra-groepsreconciliatie zonder een apart ontworpen, identiteitsgebonden en fail-closed synchronisatierunbook.
+
+## Pilotstand bij vastlegging
+
+- Staging: Mikkie bevestigde een echte Entra-login en het Gateway-lid `mvanfalier@atura.nl` is read-only teruggelezen als `member`. Staging-owner `public+appsatura@atura.nl` bleef bestaan. Access laat slechts deze twee adressen toe; zowel de Gateway- als wildcard-app staat de Entra-IdP naast One-time PIN en Cloudflare toe.
+- Productie: Entra is eveneens als extra Access-aanmeldmethode ingesteld; de allow-policy bevat `mvanfalier@atura.nl` en de ongewijzigde owner `public+everyapp@atura.nl`. **Mikkies productie-login en Gateway-lidmaatschap zijn nog niet bewezen**: de interactieve proef werd niet beantwoord. Automatische Gateway-inschrijving is na die proef meteen verwijderd en als afwezig gecontroleerd; de owner is voorlopig het enige productielid.
+- De Entra-app is uitsluitend aan Mikkie toegewezen. De clientsecret staat in een profielprivate credentialfile buiten git en moet tijdig vóór verval worden geroteerd. Geen secret, eenmalige code of uitnodigingslink hoort in deze documentatie.
+- De externe-link-ACL en persoonlijke inrichting zijn PR-werk, **niet** onderdeel van de huidige productierelease. Twee parallel ontwikkelde PR's gebruikten aanvankelijk allebei migratie `0024`; nummering/journal/snapshot moeten bij integratie worden opgelost. Een groen PR-resultaat afzonderlijk bewijst de gecombineerde migratie en de live UX niet.
