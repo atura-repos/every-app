@@ -34,6 +34,8 @@ interface AppListItemProps {
   app: UserAccessApp;
   pinned: boolean;
   onTogglePin: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
   /** Opens the setup dialog, for an app that needs setup. */
   onOpenSetup: () => void;
   /** Opens the "Use it from your agent" dialog, for an MCP app that is set up. */
@@ -76,6 +78,8 @@ export function AppListItem({
   app,
   pinned,
   onTogglePin,
+  onMoveUp,
+  onMoveDown,
   onOpenSetup,
   onUseMcp,
   layout,
@@ -198,6 +202,28 @@ export function AppListItem({
           </TooltipTrigger>
           <TooltipContent>{pinLabel}</TooltipContent>
         </Tooltip>
+        {onMoveUp && onMoveDown ? (
+          <span className="pointer-events-auto relative z-10 flex gap-1 md:ml-2">
+            <button
+              type="button"
+              aria-label={`Move ${app.name} up`}
+              title="Move up"
+              onClick={onMoveUp}
+              className="rounded border px-1"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              aria-label={`Move ${app.name} down`}
+              title="Move down"
+              onClick={onMoveDown}
+              className="rounded border px-1"
+            >
+              ↓
+            </button>
+          </span>
+        ) : null}
         {list ? (
           routable && !paused ? (
             <span

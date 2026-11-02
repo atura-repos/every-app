@@ -280,6 +280,7 @@ The fixture `packages/cli/src/docs/parity.test.ts` reads this section:
 | Account menu → AI connections: the list | `mcpConnections.listMyMcpConnections` | `workspace connections` | `everyapp_my_connections` | any signed-in user, across every organization they belong to; the operator sees every member's (`--user` narrows) |
 | AI connections → Revoke | `mcpConnections.revokeMyMcpConnection` | `workspace connection revoke` | `everyapp_revoke_connection` | |
 | Home: external links for the active workspace | `externalLinks.listExternalLinks` | — | — | no twin: these are browser bookmarks, not deployed apps; the destination has its own authentication and no Gateway grant |
+| Home: personal HTTPS links, pins, order, layout | `personalPortal.listPersonalLinks`, `createPersonalLink`, `updatePersonalLink`, `deletePersonalLink`, `getPortalPreferences`, `savePortalPreferences`, `importPortalPreferences` | — | — | member-only account + organization scoped; browser-local pins/layout imported once when no server preference exists; no destination authorization or app grant |
 | Admin → External links → Add link | `externalLinks.createExternalLink` | — | — | no twin: portal-only navigation metadata, not a Worker or Access policy change; admin or owner only |
 | Admin → External links → Edit link | `externalLinks.updateExternalLink` | — | — | no twin: portal-only navigation metadata; admin or owner only |
 | Admin → External links → Delete link | `externalLinks.deleteExternalLink` | — | — | no twin: portal-only navigation metadata; admin or owner only |
