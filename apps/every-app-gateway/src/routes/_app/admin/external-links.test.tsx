@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
   remove: vi.fn(),
+  options: vi.fn(),
+  access: vi.fn(),
   refetch: vi.fn(),
   invalidate: vi.fn(),
   links: [] as {
@@ -14,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     organizationId: string;
     name: string;
     url: string;
+    everyone: boolean;
     createdAt: Date;
     updatedAt: Date;
   }[],
@@ -25,6 +28,8 @@ vi.mock("@/serverFunctions/externalLinks", () => ({
   createExternalLink: mocks.create,
   updateExternalLink: mocks.update,
   deleteExternalLink: mocks.remove,
+  externalLinkAccessOptions: mocks.options,
+  getExternalLinkAccess: mocks.access,
 }));
 vi.mock("@/client/hooks/useSession", () => ({
   useSession: () => ({ data: { session: { activeOrganizationId: "org-a" } } }),
@@ -47,6 +52,11 @@ let root: Root, container: HTMLDivElement;
 ).IS_REACT_ACT_ENVIRONMENT = true;
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.options.mockResolvedValue({
+    people: [{ id: "user-a", name: "Ana", email: "ana@example.org" }],
+    groups: [{ id: "grp_a", name: "Risk team" }],
+  });
+  mocks.access.mockResolvedValue({ everyone: true, userIds: [], groupIds: [] });
   mocks.links = [];
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -87,11 +97,71 @@ async function submit(name: string, url: string) {
   });
 }
 describe("admin external links", () => {
+  it("sends selected member and group grants for a restricted link", async () => {
+    await mount();
+    await act(async () => {
+      Array.from(container.querySelectorAll("button"))
+        .find((b) => b.textContent === "Selected members and groups")!
+        .click();
+    });
+    const choices = Array.from(
+      container.querySelectorAll('input[type="checkbox"]'),
+    ) as HTMLInputElement[];
+    await act(async () => {
+      choices[0]!.click();
+      choices[1]!.click();
+    });
+    await submit("Risk", "https://example.org/");
+    expect(mocks.create).toHaveBeenCalledWith({
+      data: {
+        name: "Risk",
+        url: "https://example.org/",
+        access: { everyone: false, userIds: ["user-a"], groupIds: ["grp_a"] },
+      },
+    });
+  });
+  it("loads saved grants when editing a restricted link", async () => {
+    const id = "b500803e-444f-4000-8000-000000000000";
+    mocks.links = [
+      {
+        id,
+        organizationId: "org-a",
+        name: "Risk",
+        url: "https://example.org/",
+        everyone: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ];
+    mocks.access.mockResolvedValue({
+      everyone: false,
+      userIds: ["user-a"],
+      groupIds: ["grp_a"],
+    });
+    await mount();
+    await act(async () => {
+      Array.from(container.querySelectorAll("button"))
+        .find((b) => b.textContent === "Edit")!
+        .click();
+    });
+    expect(mocks.access).toHaveBeenCalledWith({ data: { id } });
+    expect(
+      (
+        Array.from(
+          container.querySelectorAll('input[type="checkbox"]'),
+        ) as HTMLInputElement[]
+      ).map((input) => input.checked),
+    ).toEqual([true, true]);
+  });
   it("creates a navigation link without app registration", async () => {
     await mount();
     await submit("Risk", "https://example.org/");
     expect(mocks.create).toHaveBeenCalledWith({
-      data: { name: "Risk", url: "https://example.org/" },
+      data: {
+        name: "Risk",
+        url: "https://example.org/",
+        access: { everyone: true, userIds: [], groupIds: [] },
+      },
     });
   });
   it("edits and deletes an existing link", async () => {
@@ -102,6 +172,7 @@ describe("admin external links", () => {
         organizationId: "org-a",
         name: "Risk",
         url: "https://example.org/",
+        everyone: true,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
@@ -120,7 +191,12 @@ describe("admin external links", () => {
         );
     });
     expect(mocks.update).toHaveBeenCalledWith({
-      data: { id, name: "Risk", url: "https://example.org/" },
+      data: {
+        id,
+        name: "Risk",
+        url: "https://example.org/",
+        access: { everyone: true, userIds: [], groupIds: [] },
+      },
     });
     vi.spyOn(window, "confirm").mockReturnValue(true);
     await act(async () => {

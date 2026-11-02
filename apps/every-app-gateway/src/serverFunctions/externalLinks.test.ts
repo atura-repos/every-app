@@ -32,6 +32,8 @@ import {
   listExternalLinks,
   createExternalLink,
   updateExternalLink,
+  getExternalLinkAccess,
+  externalLinkAccessOptions,
   deleteExternalLink,
 } from "./externalLinks";
 describe("external link server functions", () => {
@@ -40,12 +42,16 @@ describe("external link server functions", () => {
       mocks.errors,
       mocks.member,
     ]));
-  it.each([createExternalLink, updateExternalLink, deleteExternalLink])(
-    "allows only admins to mutate",
-    (fn) =>
-      expect((fn as never as { gates: unknown[] }).gates).toEqual([
-        mocks.errors,
-        mocks.admin,
-      ]),
+  it.each([
+    createExternalLink,
+    updateExternalLink,
+    deleteExternalLink,
+    externalLinkAccessOptions,
+    getExternalLinkAccess,
+  ])("allows only admins to mutate", (fn) =>
+    expect((fn as never as { gates: unknown[] }).gates).toEqual([
+      mocks.errors,
+      mocks.admin,
+    ]),
   );
 });

@@ -56,11 +56,13 @@ vi.mock("@/server/sign-in-providers", () => ({
  * link or redirect can never send.
  */
 const READS = [
+  "externalLinkAccessOptions",
   "getActiveOrganization",
   "getAiDefault",
   "getAppAccessState",
   "getApps",
   "getEmailStatus",
+  "getExternalLinkAccess",
   "getGroupApps",
   "getGroupMembers",
   "getMcpApp",

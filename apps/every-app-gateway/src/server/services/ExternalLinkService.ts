@@ -10,7 +10,19 @@ type Input = z.output<typeof externalLinkFormSchema>;
 type Update = z.output<typeof externalLinkUpdateSchema>;
 
 export const ExternalLinkService = {
-  list: (ctx: OrgContext) => ExternalLinkRepository.list(ctx.orgId),
+  list: (ctx: OrgContext) =>
+    ExternalLinkRepository.list(
+      ctx.orgId,
+      ctx.userId,
+      ctx.role === "admin" || ctx.role === "owner",
+    ),
+  options: (ctx: OrgContext) => ExternalLinkRepository.options(ctx.orgId),
+  access: async (ctx: OrgContext, id: string) => {
+    const access = await ExternalLinkRepository.access(ctx.orgId, id);
+    if (!access)
+      throw new PublicError("APP_NOT_FOUND", "External link not found");
+    return access;
+  },
   create: (ctx: OrgContext, data: Input) =>
     ExternalLinkRepository.create({
       id: crypto.randomUUID(),
@@ -21,6 +33,7 @@ export const ExternalLinkService = {
     const row = await ExternalLinkRepository.update(ctx.orgId, data.id, {
       name: data.name,
       url: data.url,
+      access: data.access,
     });
     if (!row) throw new PublicError("APP_NOT_FOUND", "External link not found");
     return row;

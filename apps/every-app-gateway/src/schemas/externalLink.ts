@@ -3,6 +3,13 @@ import { z } from "zod";
 /** Navigation only: never an app deployment or an Access policy change. */
 export const externalLinkFormSchema = z.object({
   name: z.string().trim().min(1).max(120),
+  access: z
+    .object({
+      everyone: z.boolean(),
+      userIds: z.array(z.string().min(1)).max(500),
+      groupIds: z.array(z.string().min(1)).max(500),
+    })
+    .optional(),
   url: z
     .string()
     .trim()

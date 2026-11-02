@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import {
   apps,
+  externalLinkUsers,
   groupMembers,
   members,
   organizations,
@@ -327,6 +328,15 @@ async function removeMember(
         and(
           eq(userAppAccess.userId, userId),
           eq(userAppAccess.organizationId, organizationId),
+          membershipGone,
+        ),
+      ),
+    db
+      .delete(externalLinkUsers)
+      .where(
+        and(
+          eq(externalLinkUsers.userId, userId),
+          eq(externalLinkUsers.organizationId, organizationId),
           membershipGone,
         ),
       ),
