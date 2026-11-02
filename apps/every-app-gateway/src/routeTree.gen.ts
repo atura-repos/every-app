@@ -27,6 +27,7 @@ import { Route as AppAdminIndexRouteImport } from './routes/_app/admin/index'
 import { Route as AppAdminActivityRouteImport } from './routes/_app/admin/activity'
 import { Route as AppAdminAppsRouteImport } from './routes/_app/admin/apps'
 import { Route as AppAdminEventsRouteImport } from './routes/_app/admin/events'
+import { Route as AppAdminExternalLinksRouteImport } from './routes/_app/admin/external-links'
 import { Route as AppAdminGroupsRouteImport } from './routes/_app/admin/groups'
 import { Route as AppAdminProvidersRouteImport } from './routes/_app/admin/providers'
 import { Route as AppAdminSignInRouteImport } from './routes/_app/admin/sign-in'
@@ -132,6 +133,11 @@ const AppAdminEventsRoute = AppAdminEventsRouteImport.update({
   path: '/events',
   getParentRoute: () => AppAdminRoute,
 } as any)
+const AppAdminExternalLinksRoute = AppAdminExternalLinksRouteImport.update({
+  id: '/external-links',
+  path: '/external-links',
+  getParentRoute: () => AppAdminRoute,
+} as any)
 const AppAdminGroupsRoute = AppAdminGroupsRouteImport.update({
   id: '/groups',
   path: '/groups',
@@ -226,6 +232,7 @@ export interface FileRoutesByFullPath {
   '/admin/activity': typeof AppAdminActivityRoute
   '/admin/apps': typeof AppAdminAppsRoute
   '/admin/events': typeof AppAdminEventsRoute
+  '/admin/external-links': typeof AppAdminExternalLinksRoute
   '/admin/groups': typeof AppAdminGroupsRoute
   '/admin/providers': typeof AppAdminProvidersRoute
   '/admin/sign-in': typeof AppAdminSignInRoute
@@ -259,6 +266,7 @@ export interface FileRoutesByTo {
   '/admin/activity': typeof AppAdminActivityRoute
   '/admin/apps': typeof AppAdminAppsRoute
   '/admin/events': typeof AppAdminEventsRoute
+  '/admin/external-links': typeof AppAdminExternalLinksRoute
   '/admin/groups': typeof AppAdminGroupsRoute
   '/admin/providers': typeof AppAdminProvidersRoute
   '/admin/sign-in': typeof AppAdminSignInRoute
@@ -295,6 +303,7 @@ export interface FileRoutesById {
   '/_app/admin/activity': typeof AppAdminActivityRoute
   '/_app/admin/apps': typeof AppAdminAppsRoute
   '/_app/admin/events': typeof AppAdminEventsRoute
+  '/_app/admin/external-links': typeof AppAdminExternalLinksRoute
   '/_app/admin/groups': typeof AppAdminGroupsRoute
   '/_app/admin/providers': typeof AppAdminProvidersRoute
   '/_app/admin/sign-in': typeof AppAdminSignInRoute
@@ -331,6 +340,7 @@ export interface FileRouteTypes {
     | '/admin/activity'
     | '/admin/apps'
     | '/admin/events'
+    | '/admin/external-links'
     | '/admin/groups'
     | '/admin/providers'
     | '/admin/sign-in'
@@ -364,6 +374,7 @@ export interface FileRouteTypes {
     | '/admin/activity'
     | '/admin/apps'
     | '/admin/events'
+    | '/admin/external-links'
     | '/admin/groups'
     | '/admin/providers'
     | '/admin/sign-in'
@@ -399,6 +410,7 @@ export interface FileRouteTypes {
     | '/_app/admin/activity'
     | '/_app/admin/apps'
     | '/_app/admin/events'
+    | '/_app/admin/external-links'
     | '/_app/admin/groups'
     | '/_app/admin/providers'
     | '/_app/admin/sign-in'
@@ -565,6 +577,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminEventsRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/_app/admin/external-links': {
+      id: '/_app/admin/external-links'
+      path: '/external-links'
+      fullPath: '/admin/external-links'
+      preLoaderRoute: typeof AppAdminExternalLinksRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/_app/admin/groups': {
       id: '/_app/admin/groups'
       path: '/groups'
@@ -677,6 +696,7 @@ interface AppAdminRouteChildren {
   AppAdminActivityRoute: typeof AppAdminActivityRoute
   AppAdminAppsRoute: typeof AppAdminAppsRoute
   AppAdminEventsRoute: typeof AppAdminEventsRoute
+  AppAdminExternalLinksRoute: typeof AppAdminExternalLinksRoute
   AppAdminGroupsRoute: typeof AppAdminGroupsRoute
   AppAdminProvidersRoute: typeof AppAdminProvidersRoute
   AppAdminSignInRoute: typeof AppAdminSignInRoute
@@ -690,6 +710,7 @@ const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminActivityRoute: AppAdminActivityRoute,
   AppAdminAppsRoute: AppAdminAppsRoute,
   AppAdminEventsRoute: AppAdminEventsRoute,
+  AppAdminExternalLinksRoute: AppAdminExternalLinksRoute,
   AppAdminGroupsRoute: AppAdminGroupsRoute,
   AppAdminProvidersRoute: AppAdminProvidersRoute,
   AppAdminSignInRoute: AppAdminSignInRoute,

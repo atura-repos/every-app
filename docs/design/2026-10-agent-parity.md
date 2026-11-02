@@ -279,6 +279,10 @@ The fixture `packages/cli/src/docs/parity.test.ts` reads this section:
 | Connected accounts → Disconnect (my own), Admin → Providers → Disconnect (anyone's or the organization's) | `connections.disconnectConnection` | `provider disconnect` | `everyapp_provider_disconnect` | revokes at the provider when its flow has a revoke endpoint |
 | Account menu → AI connections: the list | `mcpConnections.listMyMcpConnections` | `workspace connections` | `everyapp_my_connections` | any signed-in user, across every organization they belong to; the operator sees every member's (`--user` narrows) |
 | AI connections → Revoke | `mcpConnections.revokeMyMcpConnection` | `workspace connection revoke` | `everyapp_revoke_connection` | |
+| Home: external links for the active workspace | `externalLinks.listExternalLinks` | — | — | no twin: these are browser bookmarks, not deployed apps; the destination has its own authentication and no Gateway grant |
+| Admin → External links → Add link | `externalLinks.createExternalLink` | — | — | no twin: portal-only navigation metadata, not a Worker or Access policy change; admin or owner only |
+| Admin → External links → Edit link | `externalLinks.updateExternalLink` | — | — | no twin: portal-only navigation metadata; admin or owner only |
+| Admin → External links → Delete link | `externalLinks.deleteExternalLink` | — | — | no twin: portal-only navigation metadata; admin or owner only |
 | Admin → Groups: the list | `groups.listGroups` | `workspace groups` | `everyapp_workspace_groups` | |
 | Admin → Groups → New group | `groups.createGroup` | `workspace group create` | `everyapp_workspace_group_create` | |
 | Admin → Groups → Edit | `groups.updateGroup` | `workspace group set` | `everyapp_workspace_group_set` | |
