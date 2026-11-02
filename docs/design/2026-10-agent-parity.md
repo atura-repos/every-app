@@ -287,6 +287,8 @@ The fixture `packages/cli/src/docs/parity.test.ts` reads this section:
 | Home: preferences → Load | `personalPortal.getPortalPreferences` | — | — | no twin: account- and workspace-scoped presentation settings are UI-only |
 | Home: preferences → Save | `personalPortal.savePortalPreferences` | — | — | no twin: account- and workspace-scoped presentation settings are UI-only; they cannot grant access |
 | Home: preferences → Import browser-local | `personalPortal.importPortalPreferences` | — | — | no twin: once-only migration of matching account and workspace preferences is UI-only |
+| Admin → External links → Available members and Gateway groups | `externalLinks.externalLinkAccessOptions` | — | — | no twin: portal-only choices for managing navigation visibility; no CLI or MCP surface |
+| Admin → External links → Current link visibility grants | `externalLinks.getExternalLinkAccess` | — | — | no twin: portal-only navigation metadata; admin or owner only |
 | Admin → External links → Add link | `externalLinks.createExternalLink` | — | — | no twin: portal-only navigation metadata, not a Worker or Access policy change; admin or owner only |
 | Admin → External links → Edit link | `externalLinks.updateExternalLink` | — | — | no twin: portal-only navigation metadata; admin or owner only |
 | Admin → External links → Delete link | `externalLinks.deleteExternalLink` | — | — | no twin: portal-only navigation metadata; admin or owner only |
