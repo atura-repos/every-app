@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const LAUNCHER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../bin/everyapp.js");
 
@@ -95,7 +95,11 @@ function checkout({ pnpm = FAKE_PNPM }: { pnpm?: string } = {}): Checkout {
 
 function run(
   { cliDir, root, env }: Checkout,
-  { nodeArgs = [], args = ["status"] }: { nodeArgs?: string[]; args?: string[] } = {},
+  { nodeArgs = [], args = ["status"], onStderr }: {
+    nodeArgs?: string[];
+    args?: string[];
+    onStderr?: (text: string) => void;
+  } = {},
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [...nodeArgs, path.join(cliDir, "bin", "everyapp.js"), ...args], {
@@ -106,7 +110,10 @@ function run(
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+      onStderr?.(stderr);
+    });
     child.on("error", reject);
     child.on("close", (code) => resolve({ code, stdout, stderr }));
   });
@@ -148,9 +155,14 @@ describe("the launcher's rebuild", { timeout: 30_000 }, () => {
     const tree = checkout();
     leaveLock(tree, process.pid);
 
-    const running = run(tree);
+    let waiting = false;
+    const running = run(tree, {
+      onStderr: (text) => {
+        waiting = text.includes("Waiting for another everyapp to finish rebuilding the CLI...");
+      },
+    });
+    await vi.waitFor(() => expect(waiting).toBe(true), { timeout: 10_000 });
     // The holder finishes: dist appears and the lock goes.
-    await new Promise((resolve) => setTimeout(resolve, 700));
     fs.mkdirSync(path.join(tree.cliDir, "dist"), { recursive: true });
     fs.writeFileSync(path.join(tree.cliDir, "dist", "index.js"), 'process.stdout.write("ran\\n");\n');
     fs.rmSync(tree.lockDir, { recursive: true, force: true });
