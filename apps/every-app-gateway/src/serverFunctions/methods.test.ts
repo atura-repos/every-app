@@ -75,6 +75,7 @@ const READS = [
   "listEventDeliveries",
   "listEventSubscriptions",
   "listEventTypes",
+  "listExternalLinks",
   "listGroups",
   "listMembers",
   "listMyConnections",

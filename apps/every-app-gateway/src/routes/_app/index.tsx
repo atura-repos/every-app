@@ -40,6 +40,8 @@ import { authClient } from "@/client/auth-client";
 import { isMcpApp } from "@/client/lib/appStatus";
 import type { UserAccessApp } from "@/types/app";
 import { userAppsCollection } from "@/client/tanstack-db";
+import { useExternalLinks } from "@/client/hooks/useExternalLinks";
+import { ExternalLinkList } from "@/client/components/ExternalLinkList";
 
 /** What the "MCP apps" section says once, so its cards need only a chip. */
 const MCP_APPS_HINT =
@@ -93,6 +95,11 @@ function App() {
     activeMemberRole?.role === "owner" || activeMemberRole?.role === "admin";
   const { apps, isLoading, isError, pinnedIds, layout, togglePin, setLayout } =
     useAppLibrary();
+  const {
+    data: externalLinks,
+    isError: linksError,
+    refetch: refetchLinks,
+  } = useExternalLinks();
   // The setup dialog's app, read from the live list: it closes by itself
   // once the app is ready.
   const {
@@ -234,7 +241,9 @@ function App() {
           <ErrorState title="Failed to load apps" message="Please try again." />
         ) : null}
 
-        {hasPageApps || (isLoading && !isError) ? (
+        {hasPageApps ||
+        Boolean(externalLinks?.length) ||
+        (isLoading && !isError) ? (
           <>
             <div className="flex items-center gap-3">
               <InputGroup className="border-border bg-card shadow-xs md:max-w-sm">
@@ -308,7 +317,8 @@ function App() {
             {/* A search that matches only MCP apps leaves nothing for this
                 region: the matches are in the one below, so it isn't drawn
                 empty under a "Search results" name. */}
-            {isLoading || pageApps.length > 0 || visibleApps.length === 0 ? (
+            {hasPageApps &&
+            (isLoading || pageApps.length > 0 || visibleApps.length === 0) ? (
               <section
                 aria-label={query ? "Search results" : "All apps"}
                 aria-busy={isLoading}
@@ -364,6 +374,20 @@ function App() {
           ) : null
         ) : null}
 
+        {linksError ? (
+          <ErrorState
+            title="Failed to load external links"
+            message="Please try again."
+            onRetry={() => void refetchLinks()}
+          />
+        ) : null}
+        {externalLinks ? (
+          <ExternalLinkList
+            links={externalLinks.filter((link) =>
+              `${link.name} ${link.url}`.toLocaleLowerCase().includes(query),
+            )}
+          />
+        ) : null}
         {!isLoading && !isError && mcpApps.length > 0 ? (
           // Apps with no page, under the grid (or the gallery): the heading
           // says once how they are used, so each card needs only a chip.

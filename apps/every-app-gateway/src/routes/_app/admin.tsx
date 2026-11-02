@@ -10,6 +10,7 @@ import { useState } from "react";
 import {
   Activity as ActivityIcon,
   AppWindow,
+  ExternalLink,
   KeyRound,
   LogIn,
   Pencil,
@@ -51,6 +52,7 @@ enum AdminTab {
   SignIn = "sign-in",
   Groups = "groups",
   Apps = "apps",
+  ExternalLinks = "external-links",
   Tokens = "tokens",
   Providers = "providers",
   Usage = "usage",
@@ -73,6 +75,12 @@ const adminTabs = [
     icon: UsersRound,
   },
   { value: AdminTab.Apps, label: "Apps", to: "/admin/apps", icon: AppWindow },
+  {
+    value: AdminTab.ExternalLinks,
+    label: "External links",
+    to: "/admin/external-links",
+    icon: ExternalLink,
+  },
   {
     value: AdminTab.Tokens,
     label: "Tokens",
