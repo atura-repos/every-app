@@ -6,6 +6,7 @@ import {
   personalLinkUpdateSchema,
   personalLinkDeleteSchema,
   portalPreferencesSchema,
+  portalPreferencesImportSchema,
 } from "@/schemas/personalPortal";
 import { PersonalPortalService as service } from "@/server/services/PersonalPortalService";
 
@@ -37,7 +38,13 @@ export const savePortalPreferences = createServerFn({ method: "POST" })
   );
 export const importPortalPreferences = createServerFn({ method: "POST" })
   .middleware([publicErrorMiddleware, organizationMemberMiddleware])
-  .validator((data: unknown) => portalPreferencesSchema.parse(data))
-  .handler(async ({ context, data }) =>
-    service.importPreferences(context.org, data),
-  );
+  .validator((data: unknown) => portalPreferencesImportSchema.parse(data))
+  .handler(async ({ context, data }) => {
+    if (
+      data.expectedUserId !== context.org.userId ||
+      data.expectedOrgId !== context.org.orgId
+    ) {
+      throw new Error("Portal import identity changed");
+    }
+    return service.importPreferences(context.org, data.preferences);
+  });

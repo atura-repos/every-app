@@ -14,3 +14,8 @@ export const portalPreferencesSchema = z.object({
   orderedIds: ids,
   layout: z.enum(["grid", "list"]),
 });
+export const portalPreferencesImportSchema = z.object({
+  expectedUserId: z.string().min(1),
+  expectedOrgId: z.string().min(1),
+  preferences: portalPreferencesSchema,
+});

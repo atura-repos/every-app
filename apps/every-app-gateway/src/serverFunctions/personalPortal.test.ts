@@ -59,6 +59,25 @@ const asFn = (fn: unknown) =>
   };
 const context = { org: { orgId: "org-a", userId: "alice" } };
 describe("personal portal server boundary", () => {
+  it("refuses legacy imports when the expected identity differs from the session", async () => {
+    const fn = asFn(importPortalPreferences);
+    const data = fn.validate({
+      expectedUserId: "alice",
+      expectedOrgId: "org-a",
+      preferences: { pinnedIds: ["a"], orderedIds: [], layout: "grid" },
+    });
+    await expect(
+      fn.run({ context: { org: { orgId: "org-b", userId: "bob" } }, data }),
+    ).rejects.toThrow();
+    expect(mocks.service.importPreferences).not.toHaveBeenCalled();
+  });
+  it("requires both expected identity fields for legacy imports", () => {
+    expect(() =>
+      asFn(importPortalPreferences).validate({
+        preferences: { pinnedIds: [], orderedIds: [], layout: "grid" },
+      }),
+    ).toThrow();
+  });
   it.each([
     listPersonalLinks,
     createPersonalLink,

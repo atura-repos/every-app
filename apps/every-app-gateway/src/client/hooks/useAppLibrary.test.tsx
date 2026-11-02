@@ -4,12 +4,18 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { PortalPreferences } from "@/server/repositories/PersonalPortalRepository";
+import { importPortalPreferences } from "@/serverFunctions/personalPortal";
 import { AppLibraryLayout, useAppLibrary } from "./useAppLibrary";
 
 const state = vi.hoisted(() => ({
   account: { user: "alice", org: "one" },
   save: vi.fn(),
   get: vi.fn(),
+  apps: [
+    { id: "a", name: "Alpha", tier: "app" },
+    { id: "b", name: "Beta", tier: "app" },
+    { id: "c", name: "Charlie", tier: "app" },
+  ],
 }));
 vi.mock("@/client/hooks/useSession", () => ({
   useSession: () => ({
@@ -28,11 +34,7 @@ vi.mock("@tanstack/react-db", () => ({
   useLiveQuery: () => ({
     isReady: true,
     isError: false,
-    data: [
-      { id: "a", name: "Alpha" },
-      { id: "b", name: "Beta" },
-      { id: "c", name: "Charlie" },
-    ],
+    data: state.apps,
   }),
 }));
 vi.mock("@/serverFunctions/personalPortal", () => ({
@@ -75,6 +77,12 @@ function deferred() {
 ).IS_REACT_ACT_ENVIRONMENT = true;
 beforeEach(async () => {
   state.account = { user: "alice", org: "one" };
+  state.apps = [
+    { id: "a", name: "Alpha", tier: "app" },
+    { id: "b", name: "Beta", tier: "app" },
+    { id: "c", name: "Charlie", tier: "app" },
+  ];
+  vi.mocked(importPortalPreferences).mockReset();
   state.save.mockReset().mockResolvedValue(undefined);
   state.get
     .mockReset()
@@ -129,6 +137,112 @@ it("moves an unpinned app upward across the boundary", async () => {
     orderedIds: ["b", "a", "c"],
     layout: "grid",
   });
+});
+
+it("moves to the next visible page app instead of swapping an MCP app", async () => {
+  state.apps = [
+    { id: "a", name: "Alpha", tier: "app" },
+    { id: "b", name: "Beta", tier: "provider" },
+    { id: "c", name: "Charlie", tier: "app" },
+  ];
+  render();
+  act(() => library.moveApp("a", 1));
+  expect(client.getQueryData(["portal-preferences", "alice", "one"])).toEqual({
+    pinnedIds: ["c"],
+    orderedIds: ["c", "a", "b"],
+    layout: "grid",
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(
+    library.apps.filter((app) => app.tier !== "provider").map((app) => app.id),
+  ).toEqual(["c", "a"]);
+});
+
+it("does not import old-account legacy preferences after switching during a read", async () => {
+  let finish!: (value: PortalPreferences | null) => void;
+  const stale = new Promise<PortalPreferences | null>((resolve) => {
+    finish = resolve;
+  });
+  state.get.mockReturnValueOnce(stale);
+  const storage = Object.getOwnPropertyDescriptor(window, "localStorage");
+  const getItem = vi
+    .fn()
+    .mockReturnValue(JSON.stringify({ pinnedIds: ["a"], layout: "list" }));
+  const removeItem = vi.fn();
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: { getItem, removeItem },
+  });
+  const read = client.refetchQueries({
+    queryKey: ["portal-preferences", "alice", "one"],
+  });
+  state.account = { user: "bob", org: "two" };
+  client.setQueryData(["portal-preferences", "bob", "two"], {
+    pinnedIds: [],
+    orderedIds: [],
+    layout: "grid",
+  });
+  render();
+  await act(async () => {
+    finish(null);
+    await read;
+  });
+  expect(importPortalPreferences).not.toHaveBeenCalled();
+  expect(removeItem).not.toHaveBeenCalled();
+  if (storage) Object.defineProperty(window, "localStorage", storage);
+});
+
+it("keeps the old legacy copy and new account cache when an import finishes after switching", async () => {
+  const storage = Object.getOwnPropertyDescriptor(window, "localStorage");
+  const removeItem = vi.fn();
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: vi
+        .fn()
+        .mockReturnValue(JSON.stringify({ pinnedIds: ["a"], layout: "list" })),
+      removeItem,
+    },
+  });
+  let finish!: (value: PortalPreferences) => void;
+  vi.mocked(importPortalPreferences).mockReturnValueOnce(
+    new Promise<PortalPreferences>((resolve) => {
+      finish = resolve;
+    }) as ReturnType<typeof importPortalPreferences>,
+  );
+  state.get.mockResolvedValueOnce(null);
+  const read = client.refetchQueries({
+    queryKey: ["portal-preferences", "alice", "one"],
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(importPortalPreferences).toHaveBeenCalledWith({
+    data: {
+      expectedUserId: "alice",
+      expectedOrgId: "one",
+      preferences: { pinnedIds: ["a"], orderedIds: [], layout: "list" },
+    },
+  });
+  const bob: PortalPreferences = {
+    pinnedIds: [],
+    orderedIds: [],
+    layout: "grid",
+  };
+  client.setQueryData(["portal-preferences", "bob", "two"], bob);
+  state.account = { user: "bob", org: "two" };
+  render();
+  await act(async () => {
+    finish({ ...initial, layout: "list" });
+    await read;
+  });
+  expect(removeItem).not.toHaveBeenCalled();
+  expect(client.getQueryData(["portal-preferences", "bob", "two"])).toEqual(
+    bob,
+  );
+  if (storage) Object.defineProperty(window, "localStorage", storage);
 });
 
 it("coalesces rapid layout and pin changes while a save is in flight", async () => {

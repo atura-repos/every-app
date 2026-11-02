@@ -3,7 +3,11 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useSession } from "@/client/hooks/useSession";
-import { DEPLOYING_POLL_MS, hasDeployingApp } from "@/client/lib/appStatus";
+import {
+  DEPLOYING_POLL_MS,
+  hasDeployingApp,
+  isMcpApp,
+} from "@/client/lib/appStatus";
 import {
   userAppsCollection,
   useQueryFailed,
@@ -36,6 +40,9 @@ export function useAppLibrary() {
   const identity =
     userId && orgId ? ["portal-preferences", userId, orgId] : null;
   const account = identity?.join(":") ?? "";
+  // Query functions may outlive the render/session that started them.
+  const currentAccount = useRef(account);
+  currentAccount.current = account;
   const saves = useRef<{
     account: string;
     identity: string[] | null;
@@ -70,6 +77,8 @@ export function useAppLibrary() {
     queryFn: async () => {
       const existing = await getPortalPreferences();
       if (existing) return existing;
+      if (!userId || !orgId || currentAccount.current !== account)
+        return emptyPortalPreferences;
       // Read only this authenticated account's exact legacy key.
       const storageKey = `app-library:${userId}:${orgId}`;
       let legacy: PortalPreferences | null = null;
@@ -80,12 +89,17 @@ export function useAppLibrary() {
       } catch {
         /* disabled storage */
       }
+      if (currentAccount.current !== account) return emptyPortalPreferences;
       const imported = await importPortalPreferences({
-        data: legacy ?? emptyPortalPreferences,
+        data: {
+          expectedUserId: userId,
+          expectedOrgId: orgId,
+          preferences: legacy ?? emptyPortalPreferences,
+        },
       });
       // Failed imports keep the local copy; concurrent devices cannot overwrite
       // an already established server row (INSERT IGNORE returns that row).
-      if (legacy) {
+      if (legacy && currentAccount.current === account) {
         try {
           window.localStorage.removeItem(storageKey);
         } catch {
@@ -172,13 +186,23 @@ export function useAppLibrary() {
     },
     moveApp: (appId: string, direction: -1 | 1) => {
       update((current) => {
-        const ids = orderAuthorizedApps([...query.data], current).map(
-          (app) => app.id,
+        const ordered = orderAuthorizedApps([...query.data], current);
+        const app = ordered.find((candidate) => candidate.id === appId);
+        if (!app) return current;
+        const section = ordered.filter(
+          (candidate) => isMcpApp(candidate) === isMcpApp(app),
         );
-        const index = ids.indexOf(appId);
-        const neighbor = ids[index + direction];
+        const index = section.findIndex((candidate) => candidate.id === appId);
+        const neighbor = section[index + direction]?.id;
         if (index < 0 || !neighbor) return current;
-        [ids[index], ids[index + direction]] = [neighbor, appId];
+        const otherSection = ordered.filter(
+          (candidate) => isMcpApp(candidate) !== isMcpApp(app),
+        );
+        const sectionIds = section.map((candidate) => candidate.id);
+        [sectionIds[index], sectionIds[index + direction]] = [neighbor, appId];
+        const ids = isMcpApp(app)
+          ? [...otherSection.map((candidate) => candidate.id), ...sectionIds]
+          : [...sectionIds, ...otherSection.map((candidate) => candidate.id)];
         const pinned = new Set(current.pinnedIds);
         if (pinned.has(appId) !== pinned.has(neighbor)) {
           // Crossing the boundary exchanges pin status as well as position.
