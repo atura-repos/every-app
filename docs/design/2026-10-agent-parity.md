@@ -280,7 +280,13 @@ The fixture `packages/cli/src/docs/parity.test.ts` reads this section:
 | Account menu → AI connections: the list | `mcpConnections.listMyMcpConnections` | `workspace connections` | `everyapp_my_connections` | any signed-in user, across every organization they belong to; the operator sees every member's (`--user` narrows) |
 | AI connections → Revoke | `mcpConnections.revokeMyMcpConnection` | `workspace connection revoke` | `everyapp_revoke_connection` | |
 | Home: external links for the active workspace | `externalLinks.listExternalLinks` | — | — | no twin: these are browser bookmarks, not deployed apps; the destination has its own authentication and no Gateway grant |
-| Home: personal HTTPS links, pins, order, layout | `personalPortal.listPersonalLinks`, `createPersonalLink`, `updatePersonalLink`, `deletePersonalLink`, `getPortalPreferences`, `savePortalPreferences`, `importPortalPreferences` | — | — | member-only account + organization scoped; browser-local pins/layout imported once when no server preference exists; no destination authorization or app grant |
+| Home: personal links → List | `personalPortal.listPersonalLinks` | — | — | no twin: personal navigation-only bookmarks are deliberately UI-only, not deployed apps or Gateway grants |
+| Home: personal links → Add | `personalPortal.createPersonalLink` | — | — | no twin: user-owned personal navigation metadata is deliberately UI-only |
+| Home: personal links → Edit | `personalPortal.updatePersonalLink` | — | — | no twin: user-owned personal navigation metadata is deliberately UI-only |
+| Home: personal links → Delete | `personalPortal.deletePersonalLink` | — | — | no twin: user-owned personal navigation metadata is deliberately UI-only |
+| Home: preferences → Load | `personalPortal.getPortalPreferences` | — | — | no twin: account- and workspace-scoped presentation settings are UI-only |
+| Home: preferences → Save | `personalPortal.savePortalPreferences` | — | — | no twin: account- and workspace-scoped presentation settings are UI-only; they cannot grant access |
+| Home: preferences → Import browser-local | `personalPortal.importPortalPreferences` | — | — | no twin: once-only migration of matching account and workspace preferences is UI-only |
 | Admin → External links → Add link | `externalLinks.createExternalLink` | — | — | no twin: portal-only navigation metadata, not a Worker or Access policy change; admin or owner only |
 | Admin → External links → Edit link | `externalLinks.updateExternalLink` | — | — | no twin: portal-only navigation metadata; admin or owner only |
 | Admin → External links → Delete link | `externalLinks.deleteExternalLink` | — | — | no twin: portal-only navigation metadata; admin or owner only |
