@@ -33,7 +33,37 @@ export function useAppLibrary() {
   const orgId = session?.session.activeOrganizationId;
   const key = ["portal-preferences", userId, orgId];
   const client = useQueryClient();
-  const saving = useRef(false);
+  const identity =
+    userId && orgId ? ["portal-preferences", userId, orgId] : null;
+  const account = identity?.join(":") ?? "";
+  const saves = useRef<{
+    account: string;
+    identity: string[] | null;
+    pending: PortalPreferences | null;
+    running: boolean;
+    confirmed: PortalPreferences | null;
+  }>({
+    account: "",
+    identity: null,
+    pending: null,
+    running: false,
+    confirmed: null,
+  });
+  if (saves.current.account !== account) {
+    // Discard speculative old-account edits; only the in-flight write may land.
+    const previous = saves.current;
+    if (previous.identity && previous.confirmed) {
+      client.setQueryData(previous.identity, previous.confirmed);
+    }
+    previous.pending = null;
+    saves.current = {
+      account,
+      identity,
+      pending: null,
+      running: false,
+      confirmed: null,
+    };
+  }
   const preferencesQuery = useQuery({
     queryKey: key,
     enabled: typeof window !== "undefined" && Boolean(userId && orgId),
@@ -89,18 +119,38 @@ export function useAppLibrary() {
     return () => window.clearInterval(timer);
   }, [deploying]);
 
-  const update = async (next: PortalPreferences) => {
-    if (!userId || !orgId || !preferencesQuery.data || saving.current) return;
-    saving.current = true;
-    const identity = ["portal-preferences", userId, orgId];
-    try {
-      await savePortalPreferences({ data: next });
-      client.setQueryData(identity, next);
-    } catch {
-      toast.error("Could not save your app preferences.");
-    } finally {
-      saving.current = false;
-    }
+  const update = (
+    change: (current: PortalPreferences) => PortalPreferences,
+  ) => {
+    if (!identity || !preferencesQuery.data) return;
+    const queue = saves.current;
+    const current =
+      client.getQueryData<PortalPreferences>(identity) ?? preferencesQuery.data;
+    if (!queue.running) queue.confirmed = current;
+    const next = change(current);
+    if (next === current) return;
+    // An older read must not overwrite an optimistic edit while it saves.
+    void client.cancelQueries({ queryKey: identity, exact: true });
+    client.setQueryData(identity, next);
+    queue.pending = next;
+    if (queue.running) return;
+    queue.running = true;
+    void (async () => {
+      while (queue.pending && saves.current === queue) {
+        const value = queue.pending;
+        queue.pending = null;
+        try {
+          await savePortalPreferences({ data: value });
+          queue.confirmed = value;
+        } catch {
+          toast.error("Could not save your app preferences.");
+          if (!queue.pending && queue.confirmed) {
+            client.setQueryData(identity, queue.confirmed);
+          }
+        }
+      }
+      queue.running = false;
+    })();
   };
   return {
     apps,
@@ -110,26 +160,38 @@ export function useAppLibrary() {
     pinnedApps: apps.filter((app) => pinnedIds.has(app.id)),
     layout: preferences.layout as AppLibraryLayout,
     setLayout: (layout: AppLibraryLayout) =>
-      void update({ ...preferences, layout }),
+      update((current) => ({ ...current, layout })),
     togglePin: (appId: string) => {
       if (!apps.some((app) => app.id === appId)) return;
-      void update({
-        ...preferences,
-        pinnedIds: pinnedIds.has(appId)
-          ? preferences.pinnedIds.filter((id) => id !== appId)
-          : [...preferences.pinnedIds, appId],
-      });
+      update((current) => ({
+        ...current,
+        pinnedIds: current.pinnedIds.includes(appId)
+          ? current.pinnedIds.filter((id) => id !== appId)
+          : [...current.pinnedIds, appId],
+      }));
     },
     moveApp: (appId: string, direction: -1 | 1) => {
-      const ids = apps.map((app) => app.id);
-      const index = ids.indexOf(appId);
-      if (index < 0 || index + direction < 0 || index + direction >= ids.length)
-        return;
-      [ids[index], ids[index + direction]] = [
-        ids[index + direction]!,
-        ids[index]!,
-      ];
-      void update({ ...preferences, orderedIds: ids });
+      update((current) => {
+        const ids = orderAuthorizedApps([...query.data], current).map(
+          (app) => app.id,
+        );
+        const index = ids.indexOf(appId);
+        const neighbor = ids[index + direction];
+        if (index < 0 || !neighbor) return current;
+        [ids[index], ids[index + direction]] = [neighbor, appId];
+        const pinned = new Set(current.pinnedIds);
+        if (pinned.has(appId) !== pinned.has(neighbor)) {
+          // Crossing the boundary exchanges pin status as well as position.
+          if (pinned.has(appId)) {
+            pinned.delete(appId);
+            pinned.add(neighbor);
+          } else {
+            pinned.add(appId);
+            pinned.delete(neighbor);
+          }
+        }
+        return { ...current, pinnedIds: [...pinned], orderedIds: ids };
+      });
     },
   };
 }
