@@ -44,6 +44,7 @@ export function useSession() {
     isPending: query.isPending,
     // False while the data is only the copy cached in localStorage.
     isFetchedAfterMount: query.isFetchedAfterMount,
+    isFetching: query.isFetching,
     error: query.error,
     refetch,
   };
