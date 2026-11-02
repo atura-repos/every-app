@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { useSession } from "@/client/hooks/useSession";
@@ -12,6 +12,8 @@ import {
   createExternalLink,
   updateExternalLink,
   deleteExternalLink,
+  externalLinkAccessOptions,
+  getExternalLinkAccess,
 } from "@/serverFunctions/externalLinks";
 
 export const Route = createFileRoute("/_app/admin/external-links")({
@@ -19,26 +21,85 @@ export const Route = createFileRoute("/_app/admin/external-links")({
 });
 
 function ExternalLinksAdmin() {
-  const { data: session } = useSession();
+  const {
+    data: session,
+    isFetchedAfterMount,
+    isFetching: sessionFetching,
+    error: sessionError,
+  } = useSession();
   const orgId = session?.session.activeOrganizationId;
+  const userId = session?.user.id;
+  const validated = isFetchedAfterMount && !sessionFetching && !sessionError;
   const { data: links, isPending, isError, refetch } = useExternalLinks();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  const [everyone, setEveryone] = useState(true);
+  const [userIds, setUserIds] = useState<string[]>([]);
+  const [groupIds, setGroupIds] = useState<string[]>([]);
+  const {
+    data: cachedChoices,
+    isFetchedAfterMount: choicesFetchedAfterMount,
+    isFetching: choicesFetching,
+    isError: choicesError,
+    refetch: retryChoices,
+  } = useQuery({
+    queryKey: ["external-link-access-options", orgId, userId],
+    enabled: Boolean(orgId && userId && validated),
+    meta: { persist: false },
+    queryFn: () => externalLinkAccessOptions(),
+  });
+  const choices =
+    validated && choicesFetchedAfterMount && !choicesFetching && !choicesError
+      ? cachedChoices
+      : undefined;
+  const clear = () => {
+    setEditing(null);
+    setName("");
+    setUrl("");
+    setEveryone(true);
+    setUserIds([]);
+    setGroupIds([]);
+  };
+  const edit = async (link: { id: string; name: string; url: string }) => {
+    setBusy(true);
+    try {
+      const access = await getExternalLinkAccess({ data: { id: link.id } });
+      setEditing(link.id);
+      setName(link.name);
+      setUrl(link.url);
+      setEveryone(access.everyone);
+      setUserIds(access.userIds);
+      setGroupIds(access.groupIds);
+    } catch (error) {
+      toast.error(getRuleErrorMessage(error, "Could not load link access"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const toggle = (ids: string[], set: (value: string[]) => void, id: string) =>
+    set(ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id]);
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ["external-links", orgId] });
   const save = async (event: FormEvent) => {
     event.preventDefault();
+    if (!everyone && !choices) {
+      toast.error("Load members and groups before saving access");
+      return;
+    }
     setBusy(true);
     try {
+      const access = {
+        everyone,
+        userIds: everyone ? [] : userIds,
+        groupIds: everyone ? [] : groupIds,
+      };
       if (editing)
-        await updateExternalLink({ data: { id: editing, name, url } });
-      else await createExternalLink({ data: { name, url } });
-      setEditing(null);
-      setName("");
-      setUrl("");
+        await updateExternalLink({ data: { id: editing, name, url, access } });
+      else await createExternalLink({ data: { name, url, access } });
+      clear();
       await refresh();
       toast.success("External link saved");
     } catch (error) {
@@ -52,11 +113,7 @@ function ExternalLinksAdmin() {
     setBusy(true);
     try {
       await deleteExternalLink({ data: { id } });
-      if (editing === id) {
-        setEditing(null);
-        setName("");
-        setUrl("");
-      }
+      if (editing === id) clear();
       await refresh();
       toast.success("External link deleted");
     } catch (error) {
@@ -99,19 +156,74 @@ function ExternalLinksAdmin() {
             onChange={(event) => setUrl(event.target.value)}
           />
         </label>
-        <Button type="submit" disabled={busy}>
+        <Button
+          type="button"
+          variant={everyone ? "default" : "outline"}
+          onClick={() => setEveryone(true)}
+        >
+          Everyone
+        </Button>
+        <Button
+          type="button"
+          variant={everyone ? "outline" : "default"}
+          onClick={() => setEveryone(false)}
+        >
+          Selected members and groups
+        </Button>
+        {!everyone ? (
+          <div className="w-full space-y-2" aria-label="External link access">
+            {choicesError ? (
+              <p role="alert">
+                Could not load access choices.{" "}
+                <Button type="button" onClick={() => void retryChoices()}>
+                  Retry
+                </Button>
+              </p>
+            ) : null}
+            {!choices && !choicesError ? (
+              <p>Loading members and groups…</p>
+            ) : null}
+            {choices ? (
+              <>
+                <fieldset className="flex flex-wrap gap-3">
+                  <legend>Members</legend>
+                  {choices.people.map((person) => (
+                    <label key={person.id} className="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={userIds.includes(person.id)}
+                        onChange={() => toggle(userIds, setUserIds, person.id)}
+                      />
+                      {person.name} ({person.email})
+                    </label>
+                  ))}
+                </fieldset>
+                <fieldset className="flex flex-wrap gap-3">
+                  <legend>Gateway groups</legend>
+                  {choices.groups.map((group) => (
+                    <label key={group.id} className="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={groupIds.includes(group.id)}
+                        onChange={() => toggle(groupIds, setGroupIds, group.id)}
+                      />
+                      {group.name}
+                    </label>
+                  ))}
+                </fieldset>
+                <p className="text-sm text-muted-foreground">
+                  Only selected members and group members see this link. This
+                  does not grant access to its destination.
+                </p>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+        <Button type="submit" disabled={busy || (!everyone && !choices)}>
           {editing ? "Save changes" : "Add link"}
         </Button>
         {editing ? (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              setEditing(null);
-              setName("");
-              setUrl("");
-            }}
-          >
+          <Button type="button" variant="outline" onClick={clear}>
             Cancel
           </Button>
         ) : null}
@@ -143,9 +255,7 @@ function ExternalLinksAdmin() {
                 variant="outline"
                 disabled={busy}
                 onClick={() => {
-                  setEditing(link.id);
-                  setName(link.name);
-                  setUrl(link.url);
+                  void edit(link);
                 }}
               >
                 Edit

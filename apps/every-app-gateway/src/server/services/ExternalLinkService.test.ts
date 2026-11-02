@@ -16,7 +16,7 @@ describe("external links stay inside the active organization", () => {
   it("lists only the current organization", async () => {
     repo.list.mockResolvedValue([]);
     await ExternalLinkService.list(org);
-    expect(repo.list).toHaveBeenCalledWith("org-a");
+    expect(repo.list).toHaveBeenCalledWith("org-a", "user-a", true);
   });
   it("creates only in the current organization, never an app", async () => {
     await ExternalLinkService.create(org, {

@@ -11,6 +11,7 @@ describe("external link navigation", () => {
             id: "a",
             name: "Risk",
             url: "https://example.org/risk",
+            everyone: true,
             organizationId: "org",
             createdAt: new Date(),
             updatedAt: new Date(),

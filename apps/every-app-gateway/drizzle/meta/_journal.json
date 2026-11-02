@@ -162,6 +162,13 @@
       "when": 1793638086729,
       "tag": "0024_personal_portal",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1793638116326,
+      "tag": "0025_external_link_access",
+      "breakpoints": true
     }
   ]
 }
