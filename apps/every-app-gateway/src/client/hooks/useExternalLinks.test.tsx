@@ -127,10 +127,7 @@ it("does not restore a restricted link after revoke and offline reload", async (
   root = createRoot(container);
   listExternalLinks.mockRejectedValueOnce(new Error("offline"));
   mount();
-  await act(async () => {
-    await tick();
-  });
-  expect(container.textContent).toBe("unavailable");
+  await expectText("unavailable");
   expect(container.textContent).not.toContain("Private portal");
 });
 
