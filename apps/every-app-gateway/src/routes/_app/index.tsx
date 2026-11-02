@@ -42,6 +42,8 @@ import type { UserAccessApp } from "@/types/app";
 import { userAppsCollection } from "@/client/tanstack-db";
 import { useExternalLinks } from "@/client/hooks/useExternalLinks";
 import { ExternalLinkList } from "@/client/components/ExternalLinkList";
+import { PersonalLinks } from "@/client/components/PersonalLinks";
+import { usePersonalLinks } from "@/client/hooks/usePersonalLinks";
 
 /** What the "MCP apps" section says once, so its cards need only a chip. */
 const MCP_APPS_HINT =
@@ -93,8 +95,21 @@ function App() {
     authClient.useActiveMemberRole();
   const userCanManageApps =
     activeMemberRole?.role === "owner" || activeMemberRole?.role === "admin";
-  const { apps, isLoading, isError, pinnedIds, layout, togglePin, setLayout } =
-    useAppLibrary();
+  const {
+    apps,
+    isLoading,
+    isError,
+    pinnedIds,
+    layout,
+    togglePin,
+    setLayout,
+    moveApp,
+  } = useAppLibrary();
+  const {
+    data: personalLinks,
+    isError: personalLinksError,
+    refetch: refetchPersonalLinks,
+  } = usePersonalLinks();
   const {
     data: externalLinks,
     isError: linksError,
@@ -188,6 +203,8 @@ function App() {
       app={app}
       pinned={pinnedIds.has(app.id)}
       onTogglePin={() => togglePin(app.id)}
+      onMoveUp={() => moveApp(app.id, -1)}
+      onMoveDown={() => moveApp(app.id, 1)}
       onOpenSetup={() => openSetup(app)}
       onUseMcp={() => setMcpApp(app)}
       layout={layout}
@@ -374,6 +391,21 @@ function App() {
           ) : null
         ) : null}
 
+        {personalLinksError ? (
+          <ErrorState
+            title="Failed to load personal links"
+            message="Please try again."
+            onRetry={() => void refetchPersonalLinks()}
+          />
+        ) : null}
+        {personalLinks ? (
+          <PersonalLinks
+            key={`${session.data?.user.id}:${session.data?.session.activeOrganizationId}`}
+            links={personalLinks.filter((link) =>
+              `${link.name} ${link.url}`.toLocaleLowerCase().includes(query),
+            )}
+          />
+        ) : null}
         {linksError ? (
           <ErrorState
             title="Failed to load external links"
