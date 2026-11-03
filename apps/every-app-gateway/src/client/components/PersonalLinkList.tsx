@@ -6,8 +6,8 @@ export function PersonalLinkList({
   onDelete,
 }: {
   links: PersonalLink[];
-  onEdit: (link: PersonalLink) => void;
-  onDelete: (link: PersonalLink) => void;
+  onEdit?: (link: PersonalLink) => void;
+  onDelete?: (link: PersonalLink) => void;
 }) {
   if (!links.length) return null;
   return (
@@ -29,22 +29,24 @@ export function PersonalLinkList({
               Personal external site · opens in a new tab; destination access is
               separate
             </p>
-            <div className="mt-2 flex gap-3">
-              <button
-                type="button"
-                className="text-sm underline"
-                onClick={() => onEdit(link)}
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                className="text-sm underline"
-                onClick={() => onDelete(link)}
-              >
-                Delete
-              </button>
-            </div>
+            {onEdit && onDelete ? (
+              <div className="mt-2 flex gap-3">
+                <button
+                  type="button"
+                  className="text-sm underline"
+                  onClick={() => onEdit(link)}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="text-sm underline"
+                  onClick={() => onDelete(link)}
+                >
+                  Delete
+                </button>
+              </div>
+            ) : null}
           </li>
         ))}
       </ul>
