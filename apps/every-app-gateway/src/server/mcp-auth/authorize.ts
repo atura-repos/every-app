@@ -125,7 +125,7 @@ export async function handleAuthorize(
     return errorPage(
       400,
       CANT_CONNECT,
-      "This app didn't use PKCE (S256), which EveryApp requires.",
+      "This app didn't use PKCE (S256), which Atura Apps Portal requires.",
     );
   }
   if (onPlatformDomain(authRequest.redirectUri, mcpAuth.issuer, env)) {

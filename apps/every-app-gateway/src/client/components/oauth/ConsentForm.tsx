@@ -93,15 +93,11 @@ export function ConsentForm({
               {initials(client.name)}
             </div>
             <ArrowLeftRight className="size-4 text-muted-foreground" />
-            <img
-              src="/transparent-logo.png"
-              alt=""
-              className="size-12 rounded-lg"
-            />
+            <img src="/atura-mark.svg" alt="" className="size-12 rounded-lg" />
           </div>
           <CardTitle className="mt-4 text-xl">
             <h1 className="line-clamp-3 break-words" title={client.name}>
-              Connect {client.name} to EveryApp
+              Connect {client.name} to Atura Apps Portal
             </h1>
           </CardTitle>
           {verified ? (

@@ -57,7 +57,7 @@ export const CONNECT_AGENT_COPY = {
       label: "Codex",
       steps: [
         {
-          text: "Add EveryApp",
+          text: "Add Atura Apps Portal",
           code: (address) => `codex mcp add everyapp --url ${address}`,
         },
         { text: SIGN_IN, code: () => "codex mcp login everyapp" },

@@ -1159,7 +1159,7 @@ export const catalogue = {
       },
       message:
         input.message ??
-        "Test event from EveryApp. Your subscription receives events.",
+        "Test event from Atura Apps Portal. Your subscription receives events.",
     });
   },
 } as const;
@@ -1495,7 +1495,7 @@ export function summarize(
       return `${str(d.provider) ?? "A provider"}'s default models are now chat ${model(now.chat)}, embeddings ${model(now.embeddings)}`;
     }
     case "ping":
-      return "Test event from EveryApp";
+      return "Test event from Atura Apps Portal";
     default:
       if (isAppOwnEventType(type)) {
         const rest = type.slice(APP_EVENT_PREFIX.length);

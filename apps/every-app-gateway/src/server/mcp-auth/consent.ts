@@ -393,7 +393,7 @@ export async function nativeGrantFor(
     return {
       ok: false,
       message:
-        "This app isn't available on EveryApp any more. Sign in again from the app once it is.",
+        "This app isn't available on Atura Apps Portal any more. Sign in again from the app once it is.",
     };
   }
   const app: ConsentApp = {
@@ -409,7 +409,7 @@ export async function nativeGrantFor(
   if (!organizations.length) {
     return {
       ok: false,
-      message: `You can't open ${app.name} on EveryApp, so you can't sign an app into it. Ask an owner or admin for access, then sign in again from the app.`,
+      message: `You can't open ${app.name} on Atura Apps Portal, so you can't sign an app into it. Ask an owner or admin for access, then sign in again from the app.`,
     };
   }
   return { ok: true, app, organizations };

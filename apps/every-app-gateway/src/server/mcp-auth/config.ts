@@ -208,7 +208,7 @@ function build(
     resourceMetadata: {
       resource,
       authorization_servers: [issuer],
-      resource_name: "EveryApp",
+      resource_name: "Atura Apps Portal",
     },
     // Advertised in the 401 challenge and the protected-resource metadata,
     // not enforced (the validator below takes a token with either): clients

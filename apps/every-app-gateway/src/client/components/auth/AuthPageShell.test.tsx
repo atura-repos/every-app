@@ -22,8 +22,8 @@ describe("the product lockup on signed-out pages", () => {
       </AuthCard>,
     );
     const image = host.querySelector("img");
-    expect(image?.getAttribute("src")).toBe("/android-chrome-192x192.png");
-    expect(image?.parentElement?.textContent).toBe("EveryApp");
+    expect(image?.getAttribute("src")).toBe("/atura-mark.svg");
+    expect(image?.parentElement?.textContent).toBe("Atura Apps Portal");
     expect(host.querySelector("a")).toBeNull();
     expect(host.querySelector("h1")?.textContent).toBe("Sign in");
   });
@@ -31,9 +31,9 @@ describe("the product lockup on signed-out pages", () => {
   it("does the same on a StatusScreen with a logo", () => {
     const host = render(<StatusScreen logo title="Page not found" />);
     expect(host.querySelector("img")?.getAttribute("src")).toBe(
-      "/android-chrome-192x192.png",
+      "/atura-mark.svg",
     );
-    expect(host.textContent).toContain("EveryApp");
+    expect(host.textContent).toContain("Atura Apps Portal");
     expect(host.querySelector("a")).toBeNull();
   });
 });

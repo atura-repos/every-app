@@ -124,7 +124,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           name="apple-mobile-web-app-status-bar-style"
           content="black-translucent"
         />
-        <meta name="apple-mobile-web-app-title" content="EveryApp" />
+        <meta name="apple-mobile-web-app-title" content="Atura Apps Portal" />
         <meta
           name="theme-color"
           content="#121212"
@@ -135,10 +135,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           content="#f0f0f0"
           media="(prefers-color-scheme: light)"
         />
-        <meta
-          name="description"
-          content="Make every app open source. No subscriptions or paywalls. Own your data. Share with the world."
-        />
+        <meta name="description" content="Atura Apps Portal" />
         <link rel="manifest" href="/site.webmanifest" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <link rel="icon" type="image/x-icon" href="/favicon.ico" />
@@ -155,7 +152,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           href="/favicon-16x16.png"
         />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-        <title>EveryApp</title>
+        <title>Atura Apps Portal</title>
         <HeadContent />
       </head>
       <body>

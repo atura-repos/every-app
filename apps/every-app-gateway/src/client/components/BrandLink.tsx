@@ -8,7 +8,7 @@ import { cn } from "cn";
  */
 export function BrandMark({
   className,
-  mark = "size-6",
+  mark = "size-8",
 }: {
   className?: string;
   /** The tile's size class. */
@@ -21,12 +21,13 @@ export function BrandMark({
         className,
       )}
     >
+      <img src="/atura-mark.svg" alt="" className={cn("dark:hidden", mark)} />
       <img
-        src="/android-chrome-192x192.png"
+        src="/atura-mark-dark.svg"
         alt=""
-        className={cn("rounded-md", mark)}
+        className={cn("hidden dark:block", mark)}
       />
-      EveryApp
+      Atura Apps Portal
     </span>
   );
 }
