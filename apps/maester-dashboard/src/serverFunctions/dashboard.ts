@@ -21,11 +21,18 @@ export const getDashboard = createServerFn()
     };
     const tenants = await listTenants(user, config);
     const selectedTenant = selectTenant(tenants, data.tenant);
-    const { runs, comparisons } = await readDashboard(
+    const { runs, comparisons, importEvents } = await readDashboard(
       user,
       config,
       selectedTenant,
       data.suite,
     );
-    return { tenants, selectedTenant, suite: data.suite, runs, comparisons };
+    return {
+      tenants,
+      selectedTenant,
+      suite: data.suite,
+      runs,
+      comparisons,
+      importEvents,
+    };
   });

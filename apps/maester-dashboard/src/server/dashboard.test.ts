@@ -87,6 +87,31 @@ describe("pilot boundary", () => {
     ).toThrow();
     expect(() => authorizePilot(mikkie, config)).not.toThrow();
   });
+  it("shows only authorized tenant import-state codes, not other tenants or arbitrary error text", async () => {
+    await db.insert(schema.importEvents).values([
+      {
+        id: "42:100:1",
+        tenantId: "atura",
+        code: "projection_missing",
+        observedAt: "2026-11-03T00:00:00Z",
+      },
+      {
+        id: "99:200:1",
+        tenantId: "other",
+        code: "private source failure",
+        observedAt: "2026-11-03T01:00:00Z",
+      },
+    ]);
+    const data = await readDashboard(mikkie, config, "atura", "daily");
+    expect(data.importEvents).toEqual([
+      {
+        id: "42:100:1",
+        code: "projection_missing",
+        observedAt: "2026-11-03T00:00:00Z",
+      },
+    ]);
+    expect(JSON.stringify(data)).not.toContain("private source failure");
+  });
   it("returns only explicitly granted tenants, never another tenant by guessed id", async () => {
     expect(await listTenants(mikkie, config)).toEqual([
       { id: "atura", name: "Atura" },

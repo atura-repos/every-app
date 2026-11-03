@@ -25,6 +25,13 @@ const model = {
       ],
     },
   ],
+  importEvents: [
+    {
+      id: "42:100:1",
+      code: "projection_missing",
+      observedAt: "2026-11-03T00:00:00Z",
+    },
+  ],
   comparisons: [
     {
       currentId: "run-1",
@@ -61,6 +68,12 @@ describe("dashboard presentation", () => {
     expect(html).toContain("PDF-concept");
     expect(html).toContain("Goedkeuren");
     expect(html).not.toContain("Klantmail verzenden");
+  });
+  it("shows actionable tenant-scoped import state without raw artifact contents", () => {
+    const html = renderToStaticMarkup(<DashboardView {...model} />);
+    expect(html).toContain("Importstatus");
+    expect(html).toContain("Veilige projectie ontbreekt");
+    expect(html).toContain("42:100:1");
   });
   it("shows empty state without claiming a historical import", () => {
     const html = renderToStaticMarkup(

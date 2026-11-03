@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   controlResults,
+  importEvents,
   scanRuns,
   tenantAccess,
   tenantRegistry,
@@ -197,8 +198,28 @@ export async function readDashboard(
       );
     runs.push(summarizeRun(row, controls));
   }
+  const importEventsForTenant = await db
+    .select({
+      id: importEvents.id,
+      code: importEvents.code,
+      observedAt: importEvents.observedAt,
+    })
+    .from(importEvents)
+    .where(eq(importEvents.tenantId, tenantId))
+    .orderBy(desc(importEvents.observedAt))
+    .limit(20);
   return {
     runs,
+    importEvents: importEventsForTenant.map((event) => ({
+      ...event,
+      code: [
+        "projection_missing",
+        "attempt_unverifiable",
+        "import_failed",
+      ].includes(event.code)
+        ? event.code
+        : "import_failed",
+    })),
     comparisons: runs.slice(0, -1).map((current, index) => ({
       currentId: current.id,
       previousId: runs[index + 1].id,

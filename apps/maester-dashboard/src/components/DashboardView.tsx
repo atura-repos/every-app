@@ -24,6 +24,7 @@ export function DashboardView({
   selectedTenant,
   suite,
   runs,
+  importEvents,
   comparisons,
 }: Props) {
   const link = (tenant: string, type: "daily" | "cis") =>
@@ -161,6 +162,26 @@ export function DashboardView({
                   </details>
                 </article>
               ))
+            )}
+          </section>
+          <section aria-labelledby="import-title">
+            <h2 id="import-title">Importstatus</h2>
+            {importEvents.length ? (
+              <ul>
+                {importEvents.map((event) => (
+                  <li key={event.id}>
+                    <time dateTime={event.observedAt}>{event.observedAt}</time>{" "}
+                    {event.id} ·{" "}
+                    {event.code === "projection_missing"
+                      ? "Veilige projectie ontbreekt — controleer de GitHub-run en herstart de import na herstel."
+                      : event.code === "attempt_unverifiable"
+                        ? "Herpoging niet verifieerbaar — controleer de artifact-herkomst."
+                        : "Import mislukt — controleer de bron en probeer na herstel opnieuw."}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted">Geen geregistreerde importproblemen.</p>
             )}
           </section>
           <section aria-labelledby="trend-title">
