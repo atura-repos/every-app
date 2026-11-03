@@ -415,6 +415,21 @@ describe("validated private reconciliation", () => {
     await expireImports(db, bucket, new Date("2027-11-04T00:00:00Z"));
     expect(objects.size).toBe(0);
   });
+  it("accepts an exactly full final pending-ledger page without a false overflow", async () => {
+    const values = Array.from(
+      { length: 10000 },
+      (_, n) =>
+        `('atura/${n.toString(16).padStart(8, "0")}-0000-4000-8000-000000000001','atura','2027-11-03T00:00:00Z')`,
+    ).join(",");
+    await client.execute(
+      `INSERT INTO pending_r2_objects(object_key,tenant_id,expires_at) VALUES ${values}`,
+    );
+    await expireImports(db, bucket, new Date("2027-11-04T00:00:00Z"));
+    expect(
+      (await client.execute("SELECT COUNT(*) AS count FROM pending_r2_objects"))
+        .rows[0].count,
+    ).toBe(0);
+  });
   it("sweeps all expired pending keys even while their grace-period ledger rows remain", async () => {
     for (let n = 0; n < 101; n++) {
       const key = `atura/${crypto.randomUUID()}`;

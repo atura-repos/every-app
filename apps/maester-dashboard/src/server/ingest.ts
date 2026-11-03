@@ -1292,8 +1292,16 @@ export async function expireImports(
         .run();
     }
     if (pending.length < 100) break;
-    if (page === 99) fail();
     pendingCursor = pending[pending.length - 1].object_key;
+    if (page === 99) {
+      const overflow = await db
+        .prepare(
+          "SELECT object_key FROM pending_r2_objects WHERE expires_at<=? AND object_key>? LIMIT 1",
+        )
+        .bind(now.toISOString(), pendingCursor)
+        .first();
+      if (overflow) fail();
+    }
   }
   const cutoff = new Date(now);
   cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 1);
