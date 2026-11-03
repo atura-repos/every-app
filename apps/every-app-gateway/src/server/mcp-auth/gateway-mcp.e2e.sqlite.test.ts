@@ -1014,7 +1014,7 @@ describe("a DCR client (Codex-style)", () => {
     );
     expect(((await init.json()) as { result: unknown }).result).toMatchObject({
       protocolVersion: "2025-06-18",
-      serverInfo: { name: "every-app", title: "acme · EveryApp" },
+      serverInfo: { name: "every-app", title: "acme · Atura Apps Portal" },
       instructions: expect.stringContaining(
         "Apps: notes (Notes), todo (Todos).",
       ),
