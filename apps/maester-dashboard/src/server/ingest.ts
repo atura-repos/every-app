@@ -1259,29 +1259,41 @@ export async function expireImports(
   }
   // Independently sweep pre-indexed uploads. This ledger survives a failed or
   // uncertain scan-run batch, including cases with no artifact_index row.
-  const { results: pending } = await db
-    .prepare(
-      "SELECT object_key,tenant_id FROM pending_r2_objects WHERE expires_at<=? LIMIT 100",
-    )
-    .bind(now.toISOString())
-    .all<{ object_key: string; tenant_id: string }>();
-  for (const item of pending) {
-    const projectionKey =
-      /^[-a-zA-Z0-9_]+\/[a-f0-9-]{36}$/.test(item.object_key) &&
-      item.object_key.startsWith(`${item.tenant_id}/`);
-    const pdfKey =
-      /^reports\/[a-f0-9]{64}\/[a-f0-9]{64}-[a-f0-9-]{36}\.pdf$/.test(
-        item.object_key,
-      );
-    if (!tokenSafe(item.tenant_id) || (!projectionKey && !pdfKey)) fail();
-    await bucket.delete(item.object_key);
-    if (await bucket.get(item.object_key)) fail();
-    await db
+  let pendingCursor = "";
+  for (let page = 0; page < 100; page++) {
+    const { results: pending } = await db
       .prepare(
-        "DELETE FROM pending_r2_objects WHERE object_key=? AND tenant_id=?",
+        "SELECT object_key,tenant_id,expires_at FROM pending_r2_objects WHERE expires_at<=? AND object_key>? ORDER BY object_key LIMIT 100",
       )
-      .bind(item.object_key, item.tenant_id)
-      .run();
+      .bind(now.toISOString(), pendingCursor)
+      .all<{ object_key: string; tenant_id: string; expires_at: string }>();
+    for (const item of pending) {
+      const projectionKey =
+        /^[-a-zA-Z0-9_]+\/[a-f0-9-]{36}$/.test(item.object_key) &&
+        item.object_key.startsWith(`${item.tenant_id}/`);
+      const pdfKey =
+        /^reports\/[a-f0-9]{64}\/[a-f0-9]{64}-[a-f0-9-]{36}\.pdf$/.test(
+          item.object_key,
+        );
+      if (!tokenSafe(item.tenant_id) || (!projectionKey && !pdfKey)) fail();
+      await bucket.delete(item.object_key);
+      if (await bucket.get(item.object_key)) fail();
+      // Re-sweep during a one-day grace period: an in-flight put can finish
+      // after the first delete, but must remain findable on the next pass.
+      const ledgerEnd = new Date(item.expires_at);
+      if (!Number.isFinite(ledgerEnd.getTime())) fail();
+      ledgerEnd.setUTCDate(ledgerEnd.getUTCDate() + 1);
+      if (now < ledgerEnd) continue;
+      await db
+        .prepare(
+          "DELETE FROM pending_r2_objects WHERE object_key=? AND tenant_id=?",
+        )
+        .bind(item.object_key, item.tenant_id)
+        .run();
+    }
+    if (pending.length < 100) break;
+    if (page === 99) fail();
+    pendingCursor = pending[pending.length - 1].object_key;
   }
   const cutoff = new Date(now);
   cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 1);

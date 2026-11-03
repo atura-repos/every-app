@@ -43,6 +43,35 @@ const bucket = {
     objects.delete(key);
   }),
 };
+const sweepDb = (): D1Database =>
+  ({
+    prepare(sql: string) {
+      let args: unknown[] = [];
+      const statement = {
+        bind(...values: unknown[]) {
+          args = values;
+          return statement;
+        },
+        async all() {
+          return {
+            results: (await client.execute({ sql, args: args as never[] }))
+              .rows,
+          };
+        },
+        async first() {
+          return (
+            (await client.execute({ sql, args: args as never[] })).rows[0] ??
+            null
+          );
+        },
+        async run() {
+          await client.execute({ sql, args: args as never[] });
+          return { success: true };
+        },
+      };
+      return statement;
+    },
+  }) as unknown as D1Database;
 beforeEach(async () => {
   objects.clear();
   bucket.put.mockClear();
@@ -159,41 +188,62 @@ describe("versioned report authorization and audit", () => {
     const pending = await db.select().from(schema.pendingR2Objects);
     expect(pending).toHaveLength(1);
     const { expireImports } = await import("./ingest");
-    const sweepDb = {
-      prepare(sql: string) {
-        let args: unknown[] = [];
-        const statement = {
-          bind(...values: unknown[]) {
-            args = values;
-            return statement;
-          },
-          async all() {
-            return {
-              results: (await client.execute({ sql, args: args as never[] }))
-                .rows,
-            };
-          },
-          async first() {
-            return (
-              (await client.execute({ sql, args: args as never[] })).rows[0] ??
-              null
-            );
-          },
-          async run() {
-            await client.execute({ sql, args: args as never[] });
-            return { success: true };
-          },
-        };
-        return statement;
-      },
-    } as unknown as D1Database;
     await expireImports(
-      sweepDb,
+      sweepDb(),
       bucket as unknown as R2Bucket,
       new Date("2027-11-04T00:00:00Z"),
     );
     expect(await db.select().from(schema.pendingR2Objects)).toHaveLength(0);
     expect(objects.size).toBe(0);
+  });
+  it("keeps an expiry ledger through a late R2 write and sweeps its bytes again", async () => {
+    const put = bucket.put.getMockImplementation()!;
+    let began!: () => void;
+    let allowWrite!: () => void;
+    let wrote!: () => void;
+    let finish!: () => void;
+    const atPut = new Promise<void>((resolve) => {
+      began = resolve;
+    });
+    const writeGate = new Promise<void>((resolve) => {
+      allowWrite = resolve;
+    });
+    const atWritten = new Promise<void>((resolve) => {
+      wrote = resolve;
+    });
+    const finishGate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    bucket.put.mockImplementationOnce(
+      async (key: string, bytes: Uint8Array) => {
+        began();
+        await writeGate;
+        await put(key, bytes);
+        wrote();
+        await finishGate;
+        throw new Error("Worker interrupted");
+      },
+    );
+    const creating = createConcept(user, config, bucket, "tenant", "run");
+    await atPut;
+    const { expireImports } = await import("./ingest");
+    await expireImports(
+      sweepDb(),
+      bucket as unknown as R2Bucket,
+      new Date("2027-11-03T06:00:00Z"),
+    );
+    expect(await db.select().from(schema.pendingR2Objects)).toHaveLength(1);
+    allowWrite();
+    await atWritten;
+    expect(objects.size).toBe(1);
+    await expireImports(
+      sweepDb(),
+      bucket as unknown as R2Bucket,
+      new Date("2027-11-03T12:00:00Z"),
+    );
+    expect(objects.size).toBe(0);
+    finish();
+    await expect(creating).rejects.toThrow("Worker interrupted");
   });
   it("cleans a partially uploaded PDF when R2 put reports a failure", async () => {
     const put = bucket.put.getMockImplementation()!;
@@ -261,6 +311,25 @@ describe("versioned report authorization and audit", () => {
         ),
       ).rejects.toThrow("Report expired");
       expect(bucket.get).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("does not finish an in-flight PDF download after the retention deadline", async () => {
+    const concept = await createConcept(user, config, bucket, "tenant", "run");
+    await approveConcept(user, config, "tenant", "run", concept.digest);
+    const get = bucket.get.getMockImplementation()!;
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2027-11-02T23:59:59Z"));
+      bucket.get.mockImplementationOnce(async (key: string) => {
+        const object = await get(key);
+        vi.setSystemTime(new Date("2027-11-03T00:00:00Z"));
+        return object;
+      });
+      await expect(
+        downloadReport(user, config, bucket, "tenant", "run", concept.digest),
+      ).rejects.toThrow("Report expired");
     } finally {
       vi.useRealTimers();
     }

@@ -125,6 +125,30 @@ describe("controlled derivative archive perimeter", () => {
     ).toBe(403);
     expect(bucket.get).not.toHaveBeenCalled();
   });
+  it("does not finish a ZIP download after expiry passes during the R2 read", async () => {
+    await db
+      .update(schema.scanRuns)
+      .set({ startedAt: "2026-11-03T00:00:00.000Z" });
+    await db
+      .update(schema.controlledOriginalIndex)
+      .set({ expiresAt: "2027-11-03T00:00:00.000Z" });
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2027-11-02T23:59:59Z"));
+      bucket.get.mockImplementationOnce(async () => {
+        vi.setSystemTime(new Date("2027-11-03T00:00:00Z"));
+        return { arrayBuffer: async () => new Uint8Array(html).buffer };
+      });
+      const response = await handleControlledRequest(
+        new Request(url()),
+        env,
+        user,
+      );
+      expect(response?.status).toBe(403);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("refuses missing or corrupted private bytes, expired metadata, and non-GET methods", async () => {
     object = null;
     expect(

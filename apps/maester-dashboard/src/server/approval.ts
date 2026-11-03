@@ -306,6 +306,11 @@ export async function downloadReport(
     new TextDecoder().decode(bytes.slice(0, 5)) !== "%PDF-"
   )
     throw new Error("PDF integrity failure");
+  // The deadline may pass while D1/R2 are being read. Recheck immediately
+  // before constructing the attachment response, not only on entry.
+  const deadline = new Date(current.startedAt);
+  deadline.setUTCFullYear(deadline.getUTCFullYear() + 1);
+  if (Date.now() >= deadline.getTime()) throw new Error("Report expired");
   return new Response(bytes as BodyInit, {
     headers: {
       "content-type": "application/pdf",

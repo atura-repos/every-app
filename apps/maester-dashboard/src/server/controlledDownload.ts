@@ -40,6 +40,7 @@ export async function handleControlledRequest(
         digest: controlledOriginalIndex.digest,
         size: controlledOriginalIndex.size,
         expiresAt: controlledOriginalIndex.expiresAt,
+        startedAt: scanRuns.startedAt,
       })
       .from(controlledOriginalIndex)
       .innerJoin(
@@ -61,9 +62,13 @@ export async function handleControlledRequest(
       )
       .limit(1);
     const entry = rows[0];
+    const runDeadline = new Date(entry?.startedAt ?? "");
+    runDeadline.setUTCFullYear(runDeadline.getUTCFullYear() + 1);
     if (
       !entry ||
+      !Number.isFinite(runDeadline.getTime()) ||
       entry.expiresAt <= new Date().toISOString() ||
+      Date.now() >= runDeadline.getTime() ||
       entry.size < 1 ||
       entry.size > 64 * 1024 ||
       !/^[-a-zA-Z0-9_]+\/[a-f0-9-]{36}$/.test(entry.objectKey) ||
@@ -86,6 +91,11 @@ export async function handleControlledRequest(
       { "controlled-original-v1.html": bytes },
       { level: 0 },
     );
+    if (
+      entry.expiresAt <= new Date().toISOString() ||
+      Date.now() >= runDeadline.getTime()
+    )
+      return unavailable();
     return new Response(new Uint8Array(archive).buffer, {
       headers: {
         "content-type": "application/zip",

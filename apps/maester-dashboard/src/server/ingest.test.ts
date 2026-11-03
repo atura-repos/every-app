@@ -415,6 +415,21 @@ describe("validated private reconciliation", () => {
     await expireImports(db, bucket, new Date("2027-11-04T00:00:00Z"));
     expect(objects.size).toBe(0);
   });
+  it("sweeps all expired pending keys even while their grace-period ledger rows remain", async () => {
+    for (let n = 0; n < 101; n++) {
+      const key = `atura/${crypto.randomUUID()}`;
+      await client.execute({
+        sql: "INSERT INTO pending_r2_objects(object_key,tenant_id,expires_at) VALUES (?,?,?)",
+        args: [key, "atura", "2027-11-03T00:00:00Z"],
+      });
+      objects.set(key, new Uint8Array([1]));
+    }
+    await expireImports(db, bucket, new Date("2027-11-03T06:00:00Z"));
+    expect(objects.size).toBe(0);
+    expect(
+      (await client.execute("SELECT * FROM pending_r2_objects")).rows,
+    ).toHaveLength(101);
+  });
   it("cleans partial controlled R2 writes and retries next schedule", async () => {
     const put = bucket.put.bind(bucket);
     let failOnce = true;
