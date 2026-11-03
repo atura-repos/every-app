@@ -38,6 +38,9 @@ const bucket = {
         }
       : null;
   }),
+  delete: vi.fn(async (key: string) => {
+    objects.delete(key);
+  }),
 };
 beforeEach(async () => {
   objects.clear();
@@ -114,6 +117,19 @@ describe("versioned report authorization and audit", () => {
         (e) => e.actorId,
       ),
     ).toEqual(["pilot"]);
+  });
+  it("cleans R2 when saving the concept version fails before D1 commits", async () => {
+    const insert = vi.spyOn(db, "insert").mockImplementation(() => {
+      throw new Error("D1 unavailable");
+    });
+    try {
+      await expect(
+        createConcept(user, config, bucket, "tenant", "run"),
+      ).rejects.toThrow("D1 unavailable");
+      expect(objects.size).toBe(0);
+    } finally {
+      insert.mockRestore();
+    }
   });
   it("lets the authorized employee download the draft to inspect before approval", async () => {
     const concept = await createConcept(user, config, bucket, "tenant", "run");

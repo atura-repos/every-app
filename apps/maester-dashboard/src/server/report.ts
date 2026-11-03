@@ -24,6 +24,7 @@ type Report = {
     passed: number;
     failed: number;
     skipped: number;
+    notRun: number;
     technical: number;
     total: number;
   };
@@ -99,7 +100,7 @@ export async function renderReport(report: Report): Promise<Uint8Array> {
   );
   y -= 19;
   text(
-    `Technische fouten ${report.counts.technical}   Verwachte controles ${report.counts.total}`,
+    `Technische fouten ${report.counts.technical}   Niet uitgevoerd ${report.counts.notRun}   Verwacht ${report.counts.total}`,
     40,
     y,
   );

@@ -16,7 +16,14 @@ const model = {
       scanStatus: "technical_error" as const,
       workflowConclusion: "failure",
       expectedTestIds: ["a", "b", "c", "d"],
-      counts: { passed: 1, failed: 1, skipped: 1, technical: 1, total: 4 },
+      counts: {
+        passed: 1,
+        failed: 1,
+        skipped: 0,
+        notRun: 1,
+        technical: 1,
+        total: 4,
+      },
       controls: [
         { testId: "a", title: "Control A", result: "Passed" as const },
         { testId: "b", title: "Control B", result: "Failed" as const },

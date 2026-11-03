@@ -22,6 +22,7 @@ type Bucket = {
   get(key: string): Promise<{
     arrayBuffer(): Promise<ArrayBuffer | SharedArrayBuffer>;
   } | null>;
+  delete(key: string): Promise<void>;
 };
 const sha256 = async (bytes: Uint8Array) =>
   Array.from(
@@ -152,17 +153,41 @@ export async function createConcept(
   await bucket.put(objectKey, bytes, {
     httpMetadata: { contentType: "application/pdf" },
   });
-  await db
-    .insert(reportVersions)
-    .values({
-      tenantId,
-      runId,
-      digest: fields.digest,
-      objectKey,
-      pdfSha256,
-      createdAt: new Date().toISOString(),
-    })
-    .onConflictDoNothing();
+  const storedVersion = async () =>
+    (
+      await db
+        .select({ objectKey: reportVersions.objectKey })
+        .from(reportVersions)
+        .where(
+          and(scope(tenantId, runId), eq(reportVersions.digest, fields.digest)),
+        )
+        .limit(1)
+    )[0];
+  try {
+    await db
+      .insert(reportVersions)
+      .values({
+        tenantId,
+        runId,
+        digest: fields.digest,
+        objectKey,
+        pdfSha256,
+        createdAt: new Date().toISOString(),
+      })
+      .onConflictDoNothing();
+  } catch (error) {
+    // A failed D1 write might have committed. Never delete a referenced object.
+    const committed = await storedVersion();
+    if (committed?.objectKey !== objectKey) await bucket.delete(objectKey);
+    throw error;
+  }
+  // A concurrent creator may have won the digest's unique version. Its key is retained.
+  const committed = await storedVersion();
+  if (!committed) {
+    await bucket.delete(objectKey);
+    throw new Error("Concept was not saved");
+  }
+  if (committed.objectKey !== objectKey) await bucket.delete(objectKey);
   return reportStatus(user, config, tenantId, runId);
 }
 

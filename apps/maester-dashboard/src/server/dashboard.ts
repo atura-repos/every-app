@@ -80,6 +80,7 @@ export function summarizeRun(run: Run, controls: Control[]) {
     passed: 0,
     failed: 0,
     skipped: 0,
+    notRun: 0,
     technical: 0,
     total: expected.size,
   };
@@ -87,12 +88,13 @@ export function summarizeRun(run: Run, controls: Control[]) {
     const result = results.get(id);
     if (result === "Passed") counts.passed++;
     else if (result === "Failed") counts.failed++;
+    else if (result === "Skipped") counts.skipped++;
     else if (
       result === "Error" ||
       (result === undefined && run.scanStatus === "technical_error")
     )
       counts.technical++;
-    else counts.skipped++;
+    else counts.notRun++;
   }
   return {
     id: run.id,

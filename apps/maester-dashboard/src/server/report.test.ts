@@ -9,7 +9,14 @@ const report = {
   startedAt: "2026-11-03T10:00:00Z",
   scanStatus: "completed",
   workflowConclusion: "failure",
-  counts: { passed: 1, failed: 1, skipped: 0, technical: 0, total: 2 },
+  counts: {
+    passed: 1,
+    failed: 1,
+    skipped: 0,
+    notRun: 0,
+    technical: 0,
+    total: 2,
+  },
   controls: [
     { testId: "a", title: "Veilige instelling", result: "Passed" },
     {
@@ -43,6 +50,30 @@ describe("customer concept PDF", () => {
     expect(text).toContain("Afgekeurd");
     expect(text).not.toContain("<script>");
     expect(text).not.toContain("secret");
+  });
+  it("prints skipped and not-executed totals separately", async () => {
+    const bytes = await renderReport({
+      ...report,
+      counts: {
+        passed: 0,
+        failed: 0,
+        skipped: 1,
+        notRun: 1,
+        technical: 0,
+        total: 2,
+      },
+      controls: [
+        { testId: "a", title: "a", result: "Skipped" },
+        { testId: "b", title: "b", result: "NotRun" },
+      ],
+    });
+    const document = await getDocument({ data: bytes }).promise;
+    const text = (await (await document.getPage(1)).getTextContent()).items
+      .map((item) => ("str" in item ? item.str : ""))
+      .join(" ");
+    expect(text).toContain("Overgeslagen 1");
+    expect(text).toContain("Niet uitgevoerd 1");
+    expect(text).not.toContain("Overgeslagen 2");
   });
   it("removes markup, control characters, and bounds untrusted field lengths", () => {
     expect(sanitizeField("<img src=x onerror=alert(1)>OK\u0000", 10)).toBe(

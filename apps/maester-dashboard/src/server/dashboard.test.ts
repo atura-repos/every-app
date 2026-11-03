@@ -165,7 +165,8 @@ describe("run read model", () => {
     expect(daily.runs[1].counts).toEqual({
       passed: 1,
       failed: 1,
-      skipped: 2,
+      skipped: 0,
+      notRun: 2,
       technical: 1,
       total: 5,
     });
@@ -178,6 +179,14 @@ describe("run read model", () => {
       ),
     ).toEqual(["2026-11-02"]);
   });
+  it("separates explicit Skipped from NotRun in every summary total", () => {
+    const summary = summarizeRun(
+      run("x", "atura", "cis", ["skipped", "missing"]),
+      [control("x", "atura", "skipped", "Skipped")],
+    );
+    expect(summary.counts.skipped).toBe(1);
+    expect(summary.counts.notRun).toBe(1);
+  });
   it("counts missing expected controls as technical when scan crashed, not compliant or merely skipped", () => {
     const broken = summarizeRun(
       run("x", "atura", "daily", ["a", "b"], "v1", "technical_error"),
@@ -187,6 +196,7 @@ describe("run read model", () => {
       passed: 0,
       failed: 0,
       skipped: 0,
+      notRun: 0,
       technical: 2,
       total: 2,
     });

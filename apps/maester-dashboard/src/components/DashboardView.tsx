@@ -136,6 +136,10 @@ export function DashboardView({
                       <span>Overgeslagen</span>
                     </div>
                     <div>
+                      <strong>{run.counts.notRun}</strong>
+                      <span>Niet uitgevoerd</span>
+                    </div>
+                    <div>
                       <strong>{run.counts.technical}</strong>
                       <span>Technische fout</span>
                     </div>
