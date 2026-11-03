@@ -6,5 +6,7 @@ declare namespace Cloudflare {
   interface Env {
     PILOT_USER_ID?: string;
     PILOT_ORG_ID?: string;
+    GITHUB_APP_ID?: string;
+    GITHUB_APP_PRIVATE_KEY?: string;
   }
 }

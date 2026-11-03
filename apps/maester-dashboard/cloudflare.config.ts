@@ -7,5 +7,10 @@ import manifest from "./everyapp.config.ts";
 // keys, its name. Nothing the Worker imports may be imported here: in dev the
 // Cloudflare Vite plugin hides this file's imports from the Worker.
 export default defineConfig((ctx) => ({
-  worker: everyAppWorker({ manifest, entrypoint, ctx }),
+  worker: everyAppWorker({
+    manifest,
+    entrypoint,
+    ctx,
+    crons: ["17 */6 * * *"],
+  }),
 }));

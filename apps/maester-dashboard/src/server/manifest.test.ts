@@ -6,6 +6,11 @@ describe("pilot manifest", () => {
     expect(manifest.public ?? []).toEqual([]);
     expect(manifest.resources).toEqual({ d1: ["DB"], r2: ["REPORTS"] });
     expect(manifest.id).toBe("maester-dashboard");
-    expect(manifest.secrets).toEqual(["PILOT_USER_ID", "PILOT_ORG_ID"]);
+    expect(manifest.secrets).toEqual([
+      "PILOT_USER_ID",
+      "PILOT_ORG_ID",
+      "GITHUB_APP_ID",
+      "GITHUB_APP_PRIVATE_KEY",
+    ]);
   });
 });

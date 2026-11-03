@@ -10,6 +10,45 @@ export const tenantRegistry = sqliteTable("tenant_registry", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
 });
+// Operator-provisioned only: immutable repository ID binds tenant and installation.
+export const githubSources = sqliteTable("github_sources", {
+  tenantId: text("tenant_id")
+    .notNull()
+    .references(() => tenantRegistry.id),
+  repoId: integer("repo_id").primaryKey(),
+  owner: text("owner").notNull(),
+  repo: text("repo").notNull(),
+  installationId: integer("installation_id").notNull(),
+  workflowId: integer("workflow_id").notNull(),
+  workflowRef: text("workflow_ref").notNull(),
+  artifactName: text("artifact_name").notNull(),
+  enabled: integer("enabled").notNull(),
+});
+export const artifactIndex = sqliteTable("artifact_index", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id")
+    .notNull()
+    .references(() => tenantRegistry.id),
+  runId: text("run_id")
+    .notNull()
+    .references(() => scanRuns.id),
+  objectKey: text("object_key").notNull(),
+  digest: text("digest").notNull(),
+  expiresAt: text("expires_at").notNull(),
+});
+export const importEvents = sqliteTable("import_events", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id")
+    .notNull()
+    .references(() => tenantRegistry.id),
+  code: text("code").notNull(),
+  observedAt: text("observed_at").notNull(),
+});
+export const retentionEvents = sqliteTable("retention_events", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  deletedAt: text("deleted_at").notNull(),
+});
 export const tenantAccess = sqliteTable(
   "tenant_access",
   {

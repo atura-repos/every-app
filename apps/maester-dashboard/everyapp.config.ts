@@ -7,6 +7,11 @@ export default defineEveryApp({
   name: "Atura Maester-dashboard",
   description: "Besloten overzicht van Maester-controles voor de Atura-pilot.",
   resources: { d1: ["DB"], r2: ["REPORTS"] },
-  secrets: ["PILOT_USER_ID", "PILOT_ORG_ID"],
+  secrets: [
+    "PILOT_USER_ID",
+    "PILOT_ORG_ID",
+    "GITHUB_APP_ID",
+    "GITHUB_APP_PRIVATE_KEY",
+  ],
   public: [],
 });

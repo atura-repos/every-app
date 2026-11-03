@@ -15,6 +15,20 @@
       "when": 1793719533689,
       "tag": "0001_sparkling_valkyrie",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793719799498,
+      "tag": "0002_shiny_beyonder",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793719937311,
+      "tag": "0003_chilly_nick_fury",
+      "breakpoints": true
     }
   ]
 }
