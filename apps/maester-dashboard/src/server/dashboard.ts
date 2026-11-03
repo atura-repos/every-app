@@ -146,8 +146,10 @@ export function compareRuns(previous: Summary, current: Summary) {
     else if (
       old !== control.result &&
       (old === "NotRun" ||
+        old === "Skipped" ||
         old === "Error" ||
         control.result === "NotRun" ||
+        control.result === "Skipped" ||
         control.result === "Error")
     )
       unresolved.push(control.testId);

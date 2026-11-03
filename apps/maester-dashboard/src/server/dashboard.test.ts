@@ -66,7 +66,7 @@ const control = (
   runId: string,
   tenantId: string,
   testId: string,
-  result: "Passed" | "Failed" | "NotRun" | "Error",
+  result: "Passed" | "Failed" | "Skipped" | "NotRun" | "Error",
 ) => ({ runId, tenantId, testId, title: testId, result });
 
 describe("pilot boundary", () => {
@@ -219,6 +219,22 @@ describe("comparison", () => {
     expect(compareRuns(previous, retitled)).toMatchObject({
       comparable: false,
       reason: "scope_changed",
+    });
+  });
+  it("keeps a Maester-skipped control unresolved rather than calling it a changed finding", () => {
+    const prior = summarizeRun(run("1", "atura", "cis", ["a"]), [
+      control("1", "atura", "a", "Failed"),
+    ]);
+    const skipped = summarizeRun(run("2", "atura", "cis", ["a"]), [
+      control("2", "atura", "a", "Skipped"),
+    ]);
+    expect(skipped.controls[0].result).toBe("Skipped");
+    expect(skipped.counts.skipped).toBe(1);
+    expect(compareRuns(prior, skipped)).toEqual({
+      comparable: true,
+      improved: [],
+      regressed: [],
+      unresolved: ["a"],
     });
   });
   it("does not call an unexecuted or technically errored test an improvement", () => {

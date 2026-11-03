@@ -13,7 +13,8 @@ type Props = Data & {
 const labels = {
   Passed: "Geslaagd",
   Failed: "Afgekeurd",
-  NotRun: "Overgeslagen",
+  Skipped: "Overgeslagen (scan)",
+  NotRun: "Niet uitgevoerd",
   Error: "Technische fout",
 } as const;
 

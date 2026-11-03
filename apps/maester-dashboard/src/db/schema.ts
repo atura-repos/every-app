@@ -60,7 +60,7 @@ export const controlResults = sqliteTable(
     testId: text("test_id").notNull(),
     title: text("title").notNull(),
     result: text("result", {
-      enum: ["Passed", "Failed", "NotRun", "Error"],
+      enum: ["Passed", "Failed", "Skipped", "NotRun", "Error"],
     }).notNull(),
   },
   (table) => [primaryKey({ columns: [table.runId, table.testId] })],
