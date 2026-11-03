@@ -42,7 +42,7 @@ import type { UserAccessApp } from "@/types/app";
 import { userAppsCollection } from "@/client/tanstack-db";
 import { useExternalLinks } from "@/client/hooks/useExternalLinks";
 import { ExternalLinkList } from "@/client/components/ExternalLinkList";
-import { PersonalLinks } from "@/client/components/PersonalLinks";
+import { LauncherPersonalLinks } from "@/client/components/LauncherPersonalLinks";
 import { usePersonalLinks } from "@/client/hooks/usePersonalLinks";
 
 /** What the "MCP apps" section says once, so its cards need only a chip. */
@@ -399,7 +399,7 @@ function App() {
           />
         ) : null}
         {personalLinks ? (
-          <PersonalLinks
+          <LauncherPersonalLinks
             key={`${session.data?.user.id}:${session.data?.session.activeOrganizationId}`}
             links={personalLinks.filter((link) =>
               `${link.name} ${link.url}`.toLocaleLowerCase().includes(query),
