@@ -629,7 +629,21 @@ async function importControlled(
       )
         externalReject();
     } catch (error) {
-      await external(() => bucket.delete(objectKey));
+      // An indexed key may be shared by a concurrent repair. Deleting it on
+      // our own failure could erase that repair's verified bytes. Retention
+      // still owns its pending ledger; only an expired/unindexed key is ours
+      // to delete here.
+      if (indexed) {
+        const active = await db
+          .prepare(
+            "SELECT 1 FROM controlled_original_index c JOIN scan_runs s ON s.id=c.run_id AND s.tenant_id=c.tenant_id JOIN pending_r2_objects p ON p.object_key=c.object_key AND p.tenant_id=c.tenant_id WHERE c.run_id=? AND c.tenant_id=? AND c.object_key=? AND s.retention_lock=0 AND s.started_at<?",
+          )
+          .bind(runId, source.tenant_id, objectKey, now.toISOString())
+          .first();
+        if (!active) await external(() => bucket.delete(objectKey));
+      } else {
+        await external(() => bucket.delete(objectKey));
+      }
       throw error;
     }
     if (indexed) {
@@ -857,6 +871,53 @@ export async function reconcile(
           );
           if (matches.length > 1) externalReject();
           if (!matches.length) {
+            // GitHub expires artifacts before our D1/R2 retention window. An
+            // intact imported projection remains valid without its source ZIP.
+            const { results: existing } = await db
+              .prepare(
+                "SELECT a.id,a.object_key,a.digest,s.retention_lock FROM artifact_index a JOIN scan_runs s ON s.id=a.run_id AND s.tenant_id=a.tenant_id WHERE a.tenant_id=? AND a.id GLOB ? LIMIT 2",
+              )
+              .bind(source.tenant_id, `${runEvent}:*`)
+              .all<{
+                id: string;
+                object_key: string;
+                digest: string;
+                retention_lock: number;
+              }>();
+            if (existing.length > 1) fail();
+            if (existing[0]?.retention_lock) continue;
+            if (existing.length === 1) {
+              const saved = await external(() =>
+                bucket.get(existing[0].object_key),
+              );
+              if (
+                saved &&
+                (await digest(
+                  new Uint8Array(await external(() => saved.arrayBuffer())),
+                )) === existing[0].digest
+              ) {
+                await resolved(db, runEvent, source.tenant_id);
+                await resolved(
+                  db,
+                  `${existing[0].id}:readback`,
+                  source.tenant_id,
+                );
+                await importControlled(
+                  db,
+                  bucket,
+                  fetcher,
+                  base,
+                  token,
+                  source,
+                  run,
+                  artifacts.artifacts,
+                  existing[0].id,
+                  runExpires.toISOString(),
+                  now,
+                );
+                continue;
+              }
+            }
             await db
               .prepare(
                 "INSERT OR IGNORE INTO import_events(id,tenant_id,code,observed_at) VALUES (?,?,?,?)",

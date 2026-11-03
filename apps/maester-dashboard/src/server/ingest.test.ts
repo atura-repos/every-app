@@ -452,6 +452,38 @@ describe("validated private reconciliation", () => {
     ).toHaveLength(0);
     expect(objects.size).toBe(0);
   });
+  it("does not delete a peer's successful indexed repair when its own R2 write fails", async () => {
+    await reconcile(db, bucket, settings, fetcher, now);
+    const key = (
+      await client.execute("SELECT object_key FROM controlled_original_index")
+    ).rows[0].object_key as string;
+    const saved = objects.get(key)!;
+    objects.delete(key);
+    const put = bucket.put.bind(bucket);
+    let reached!: () => void;
+    let release!: () => void;
+    const atFailure = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let repairs = 0;
+    bucket.put = (async (objectKey: string, bytes: Uint8Array) => {
+      if (objectKey === key && ++repairs === 1) {
+        reached();
+        await gate;
+        throw Error("R2 unavailable");
+      }
+      return put(objectKey, bytes);
+    }) as R2Bucket["put"];
+    const first = reconcile(db, bucket, settings, fetcher, now);
+    await atFailure;
+    await reconcile(db, bucket, settings, fetcher, now);
+    release();
+    await first;
+    expect(objects.get(key)).toEqual(saved);
+  });
   it("does not resurrect indexed controlled bytes when expiry wins during repair", async () => {
     await reconcile(db, bucket, settings, fetcher, now);
     const rows = (
@@ -975,6 +1007,23 @@ describe("validated private reconciliation", () => {
     expect(
       (await client.execute("SELECT * FROM import_events")).rows,
     ).toHaveLength(0);
+  });
+  it("retains a healthy imported projection after the GitHub projection artifact expires", async () => {
+    await reconcile(db, bucket, settings, fetcher, now);
+    const original = fetcher;
+    fetcher = (async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/runs/100/artifacts?per_page=100")) {
+        return Response.json({ artifacts: [] });
+      }
+      return original(url, init);
+    }) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT * FROM import_events")).rows,
+    ).toHaveLength(0);
+    expect(
+      (await client.execute("SELECT * FROM artifact_index")).rows,
+    ).toHaveLength(1);
   });
   it("records missing projection as technical import state without importing legacy HTML", async () => {
     const original = fetcher;
