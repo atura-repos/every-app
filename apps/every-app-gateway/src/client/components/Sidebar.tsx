@@ -3,6 +3,7 @@ import type { LinkOptions } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState, type ComponentType } from "react";
 import { ArrowUpRight, Bot, LayoutGrid, Settings, User } from "lucide-react";
+import { AccountSettingsLink } from "./AccountSettingsLink";
 import { authClient } from "@/client/auth-client";
 import { signOutAndForget } from "@/client/sign-out";
 import { useSession } from "@/client/hooks/useSession";
@@ -345,6 +346,13 @@ function AccountFooter({ canManageApps }: { canManageApps: boolean }) {
                     </DropdownMenuItem>
                   ))}
                   {connectable.length > 0 ? <DropdownMenuSeparator /> : null}
+                  <DropdownMenuItem
+                    render={
+                      <AccountSettingsLink
+                        onClick={() => setOpenMobile(false)}
+                      />
+                    }
+                  />
                   <DropdownMenuItem
                     render={
                       <Link

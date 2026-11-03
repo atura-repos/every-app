@@ -34,6 +34,7 @@ import { Route as AppAdminSignInRouteImport } from './routes/_app/admin/sign-in'
 import { Route as AppAdminTokensRouteImport } from './routes/_app/admin/tokens'
 import { Route as AppAdminUsageRouteImport } from './routes/_app/admin/usage'
 import { Route as AppAdminUsersRouteImport } from './routes/_app/admin/users'
+import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 import { Route as AppSettingsAccountsRouteImport } from './routes/_app/settings/accounts'
 import { Route as AppSettingsConnectionsRouteImport } from './routes/_app/settings/connections'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -168,6 +169,11 @@ const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AppAdminRoute,
 } as any)
+const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
+  id: '/settings/',
+  path: '/settings/',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSettingsAccountsRoute = AppSettingsAccountsRouteImport.update({
   id: '/settings/accounts',
   path: '/settings/accounts',
@@ -246,6 +252,7 @@ export interface FileRoutesByFullPath {
   '/api/invitations/lookup': typeof ApiInvitationsLookupRoute
   '/api/setup/claim': typeof ApiSetupClaimRoute
   '/admin/': typeof AppAdminIndexRoute
+  '/settings/': typeof AppSettingsIndexRoute
   '/api/admin/apps/install': typeof ApiAdminAppsInstallRouteWithChildren
   '/api/admin/deploys/$id': typeof ApiAdminDeploysIdRoute
   '/api/admin/apps/install/context': typeof ApiAdminAppsInstallContextRoute
@@ -280,6 +287,7 @@ export interface FileRoutesByTo {
   '/api/invitations/lookup': typeof ApiInvitationsLookupRoute
   '/api/setup/claim': typeof ApiSetupClaimRoute
   '/admin': typeof AppAdminIndexRoute
+  '/settings': typeof AppSettingsIndexRoute
   '/api/admin/apps/install': typeof ApiAdminAppsInstallRouteWithChildren
   '/api/admin/deploys/$id': typeof ApiAdminDeploysIdRoute
   '/api/admin/apps/install/context': typeof ApiAdminAppsInstallContextRoute
@@ -317,6 +325,7 @@ export interface FileRoutesById {
   '/api/invitations/lookup': typeof ApiInvitationsLookupRoute
   '/api/setup/claim': typeof ApiSetupClaimRoute
   '/_app/admin/': typeof AppAdminIndexRoute
+  '/_app/settings/': typeof AppSettingsIndexRoute
   '/api/admin/apps/install': typeof ApiAdminAppsInstallRouteWithChildren
   '/api/admin/deploys/$id': typeof ApiAdminDeploysIdRoute
   '/api/admin/apps/install/context': typeof ApiAdminAppsInstallContextRoute
@@ -354,6 +363,7 @@ export interface FileRouteTypes {
     | '/api/invitations/lookup'
     | '/api/setup/claim'
     | '/admin/'
+    | '/settings/'
     | '/api/admin/apps/install'
     | '/api/admin/deploys/$id'
     | '/api/admin/apps/install/context'
@@ -388,6 +398,7 @@ export interface FileRouteTypes {
     | '/api/invitations/lookup'
     | '/api/setup/claim'
     | '/admin'
+    | '/settings'
     | '/api/admin/apps/install'
     | '/api/admin/deploys/$id'
     | '/api/admin/apps/install/context'
@@ -424,6 +435,7 @@ export interface FileRouteTypes {
     | '/api/invitations/lookup'
     | '/api/setup/claim'
     | '/_app/admin/'
+    | '/_app/settings/'
     | '/api/admin/apps/install'
     | '/api/admin/deploys/$id'
     | '/api/admin/apps/install/context'
@@ -626,6 +638,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminUsersRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/_app/settings/': {
+      id: '/_app/settings/'
+      path: '/settings'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof AppSettingsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/settings/accounts': {
       id: '/_app/settings/accounts'
       path: '/settings/accounts'
@@ -730,6 +749,7 @@ interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
   AppSettingsAccountsRoute: typeof AppSettingsAccountsRoute
   AppSettingsConnectionsRoute: typeof AppSettingsConnectionsRoute
+  AppSettingsIndexRoute: typeof AppSettingsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -738,6 +758,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
   AppSettingsAccountsRoute: AppSettingsAccountsRoute,
   AppSettingsConnectionsRoute: AppSettingsConnectionsRoute,
+  AppSettingsIndexRoute: AppSettingsIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
