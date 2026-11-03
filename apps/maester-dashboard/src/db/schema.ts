@@ -87,6 +87,35 @@ export const scanRuns = sqliteTable(
     ),
   ],
 );
+export const reportVersions = sqliteTable(
+  "report_versions",
+  {
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenantRegistry.id),
+    runId: text("run_id")
+      .notNull()
+      .references(() => scanRuns.id),
+    digest: text("digest").notNull(),
+    objectKey: text("object_key").notNull(),
+    pdfSha256: text("pdf_sha256").notNull(),
+    createdAt: text("created_at").notNull(),
+    approvedAt: text("approved_at"),
+    approvedBy: text("approved_by"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.runId, table.digest] }),
+  ],
+);
+export const reportApprovalEvents = sqliteTable("report_approval_events", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  runId: text("run_id").notNull(),
+  digest: text("digest").notNull(),
+  actorId: text("actor_id").notNull(),
+  actorOrgId: text("actor_org_id").notNull(),
+  approvedAt: text("approved_at").notNull(),
+});
 export const controlResults = sqliteTable(
   "control_results",
   {

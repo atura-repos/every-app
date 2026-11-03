@@ -590,9 +590,29 @@ export async function expireImports(
       object_key: string;
     }>();
   for (const item of results) {
+    const { results: reports } = await db
+      .prepare(
+        "SELECT object_key FROM report_versions WHERE run_id=? AND tenant_id=?",
+      )
+      .bind(item.run_id, item.tenant_id)
+      .all<{ object_key: string }>();
+    for (const report of reports) {
+      if (!/^reports\/[a-f0-9]{64}\/[a-f0-9]{64}\.pdf$/.test(report.object_key))
+        fail();
+      await bucket.delete(report.object_key);
+      if (await bucket.get(report.object_key)) fail();
+    }
     await bucket.delete(item.object_key);
     if (await bucket.get(item.object_key)) fail();
     await db.batch([
+      db
+        .prepare(
+          "DELETE FROM report_approval_events WHERE run_id=? AND tenant_id=?",
+        )
+        .bind(item.run_id, item.tenant_id),
+      db
+        .prepare("DELETE FROM report_versions WHERE run_id=? AND tenant_id=?")
+        .bind(item.run_id, item.tenant_id),
       db
         .prepare("DELETE FROM control_results WHERE run_id=? AND tenant_id=?")
         .bind(item.run_id, item.tenant_id),

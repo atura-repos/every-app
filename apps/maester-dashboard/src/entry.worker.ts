@@ -1,11 +1,15 @@
 import tanstackEntry from "@tanstack/react-start/server-entry";
 import { everyApp } from "@every-app/sdk/server";
 import { reconcile, expireImports } from "./server/ingest";
+import { handleReportRequest } from "./server/reportEndpoint";
 
-// The Gateway validates the signed identity before application routing.
-// No tools or public routes are exposed by this pilot.
+// Gateway validates signed identity; no public routes or tools are exposed.
 export default {
-  ...everyApp<Env>(async (request) => tanstackEntry.fetch(request)),
+  ...everyApp<Env>(
+    async (request, env, _ctx, user) =>
+      (await handleReportRequest(request, env, user)) ??
+      tanstackEntry.fetch(request),
+  ),
   async scheduled(_event: ScheduledEvent, env: Env) {
     // No payloads, credentials or provider response bodies in logs.
     try {

@@ -56,6 +56,12 @@ describe("dashboard presentation", () => {
     expect(html).not.toContain("<script");
     expect(html).not.toContain("Start scan");
   });
+  it("offers explicit PDF concept and per-version approval controls without customer send", () => {
+    const html = renderToStaticMarkup(<DashboardView {...model} />);
+    expect(html).toContain("PDF-concept");
+    expect(html).toContain("Goedkeuren");
+    expect(html).not.toContain("Klantmail verzenden");
+  });
   it("shows empty state without claiming a historical import", () => {
     const html = renderToStaticMarkup(
       <DashboardView {...model} runs={[]} comparisons={[]} />,

@@ -457,6 +457,49 @@ describe("validated private reconciliation", () => {
       1,
     );
   });
+  it("deletes associated approved PDF bytes, versions and actor audit on retention", async () => {
+    await reconcile(db, bucket, settings, fetcher, now);
+    const run = (await client.execute("SELECT id FROM scan_runs")).rows[0]
+      .id as string;
+    const pdfKey = `reports/${"d".repeat(64)}/${"e".repeat(64)}.pdf`;
+    objects.set(pdfKey, new Uint8Array([37, 80, 68, 70]));
+    await client.execute({
+      sql: "INSERT INTO report_versions(tenant_id,run_id,digest,object_key,pdf_sha256,created_at,approved_at,approved_by) VALUES (?,?,?,?,?,?,?,?)",
+      args: [
+        "atura",
+        run,
+        "d".repeat(64),
+        pdfKey,
+        "e".repeat(64),
+        now.toISOString(),
+        now.toISOString(),
+        "pilot",
+      ],
+    });
+    await client.execute({
+      sql: "INSERT INTO report_approval_events(id,tenant_id,run_id,digest,actor_id,actor_org_id,approved_at) VALUES (?,?,?,?,?,?,?)",
+      args: [
+        "event",
+        "atura",
+        run,
+        "d".repeat(64),
+        "pilot",
+        "org",
+        now.toISOString(),
+      ],
+    });
+    await expireImports(db, bucket, new Date("2027-11-04T00:00:00Z"));
+    expect(objects.has(pdfKey)).toBe(false);
+    expect(
+      (await client.execute("SELECT * FROM report_versions")).rows,
+    ).toHaveLength(0);
+    expect(
+      (await client.execute("SELECT * FROM report_approval_events")).rows,
+    ).toHaveLength(0);
+    expect(
+      (await client.execute("SELECT * FROM retention_events")).rows,
+    ).toHaveLength(1);
+  });
   it("deletes expired R2 objects and rows with audit readback", async () => {
     await reconcile(db, bucket, settings, fetcher, now);
     await client.execute({

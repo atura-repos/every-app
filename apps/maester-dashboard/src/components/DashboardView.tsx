@@ -1,3 +1,4 @@
+import { ReportActions } from "./ReportActions";
 import type {
   compareRuns,
   listTenants,
@@ -142,6 +143,7 @@ export function DashboardView({
                       <span>Verwacht</span>
                     </div>
                   </div>
+                  <ReportActions tenant={selectedTenant} run={run.id} />
                   <details>
                     <summary>Controles bekijken</summary>
                     <ul className="controls">
@@ -181,8 +183,8 @@ export function DashboardView({
             )}
           </section>
           <footer>
-            Geen klantversie beschikbaar · PDF-goedkeuring en distributie zijn
-            nog niet geïmplementeerd.
+            Geen klantversie beschikbaar zonder expliciete goedkeuring. Geen
+            automatische klantmail of distributie.
           </footer>
         </div>
       </div>
