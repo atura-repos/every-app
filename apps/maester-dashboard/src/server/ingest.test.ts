@@ -192,6 +192,84 @@ beforeEach(async () => {
 });
 
 describe("validated private reconciliation", () => {
+  it("isolates a broken ZIP, retries it next schedule, and clears the resolved event", async () => {
+    const original = fetcher;
+    let broken = true;
+    fetcher = (async (url: string, init?: RequestInit) => {
+      if (url.includes("/workflows/12/runs")) {
+        const response = await original(url, init);
+        const data = (await response.json()) as {
+          workflow_runs: Record<string, unknown>[];
+        };
+        return Response.json({
+          workflow_runs: [
+            { ...data.workflow_runs[0], id: 101 },
+            data.workflow_runs[0],
+          ],
+        });
+      }
+      if (url.endsWith("/runs/101/artifacts?per_page=100")) {
+        const response = await original(url.replace("101", "100"), init);
+        const data = (await response.json()) as {
+          artifacts: Record<string, unknown>[];
+        };
+        return Response.json({
+          artifacts: data.artifacts.map((a) => ({
+            ...a,
+            id: (a.id as number) + 10,
+            name: (a.name as string).replace("100", "101"),
+            workflow_run: { id: 101, head_repository_id: 42 },
+          })),
+        });
+      }
+      if (url.endsWith("/artifacts/910/zip"))
+        return broken
+          ? new Response("bad zip")
+          : new Response(new Uint8Array(zip(doc)).buffer);
+      return original(url, init);
+    }) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT id FROM scan_runs")).rows,
+    ).toHaveLength(1);
+    expect(
+      (await client.execute("SELECT id,code FROM import_events")).rows,
+    ).toEqual([{ id: "42:101:1", code: "import_failed" }]);
+    broken = false;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT id FROM scan_runs")).rows,
+    ).toHaveLength(2);
+    expect(
+      (await client.execute("SELECT * FROM import_events")).rows,
+    ).toHaveLength(0);
+  });
+  it("isolates a failed source listing and retries it without blocking another source", async () => {
+    await client.execute(
+      "INSERT INTO github_sources(repo_id,workflow_id,workflow_ref,workflow_path,artifact_name,enabled) VALUES (42,13,'refs/heads/main','.github/workflows/other.yml','maester-atura-cis-graph-dashboard',1)",
+    );
+    const original = fetcher;
+    let unavailable = true;
+    fetcher = (async (url: string, init?: RequestInit) => {
+      if (url.includes("/workflows/13/runs")) {
+        if (unavailable) throw new Error("Bearer secret in transport error");
+        return Response.json({ workflow_runs: [] });
+      }
+      return original(url, init);
+    }) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect((await client.execute("SELECT * FROM scan_runs")).rows).toHaveLength(
+      1,
+    );
+    expect(
+      (await client.execute("SELECT id,code FROM import_events")).rows,
+    ).toEqual([{ id: "42:13:source", code: "import_failed" }]);
+    unavailable = false;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT * FROM import_events")).rows,
+    ).toHaveLength(0);
+  });
   it("accepts the data-descriptor ZIP emitted by GitHub Actions", () => {
     const body = extractProjection(zipWithDescriptor(doc));
     expect(
@@ -477,6 +555,77 @@ describe("validated private reconciliation", () => {
       (await client.execute("SELECT code FROM import_events")).rows,
     ).toEqual([{ code: "readback_unverified" }]);
   });
+  it("clears an uncertain readback only after the indexed D1 and R2 digest verify", async () => {
+    const actual = db;
+    let once = true;
+    db = {
+      ...actual,
+      prepare(sql: string) {
+        const statement = actual.prepare(sql);
+        if (!sql.includes("SELECT digest FROM artifact_index") || !once)
+          return statement;
+        once = false;
+        return {
+          ...statement,
+          bind(...args: unknown[]) {
+            const bound = statement.bind(...args);
+            return { ...bound, first: async () => null };
+          },
+        } as D1PreparedStatement;
+      },
+    } as D1Database;
+    await expect(reconcile(db, bucket, settings, fetcher, now)).rejects.toThrow(
+      "Private import rejected",
+    );
+    expect(
+      (await client.execute("SELECT code FROM import_events")).rows,
+    ).toEqual([{ code: "readback_unverified" }]);
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT * FROM import_events")).rows,
+    ).toHaveLength(0);
+    expect((await client.execute("SELECT * FROM scan_runs")).rows).toHaveLength(
+      1,
+    );
+  });
+  it("isolates R2 read failure and removes unindexed bytes before retry", async () => {
+    const originalGet = bucket.get.bind(bucket);
+    let broken = true;
+    bucket.get = (async (key: string) => {
+      if (broken) throw new Error("R2 response secret");
+      return originalGet(key);
+    }) as R2Bucket["get"];
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT code FROM import_events")).rows,
+    ).toEqual([{ code: "import_failed" }]);
+    expect(objects.size).toBe(0);
+    broken = false;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT * FROM import_events")).rows,
+    ).toHaveLength(0);
+    expect((await client.execute("SELECT * FROM scan_runs")).rows).toHaveLength(
+      1,
+    );
+  });
+  it("does not hide a D1 failure as a per-run import event", async () => {
+    const actual = db;
+    db = {
+      ...actual,
+      prepare(sql: string) {
+        if (sql.includes("SELECT digest,object_key FROM artifact_index"))
+          throw new Error("D1 unavailable");
+        return actual.prepare(sql);
+      },
+    } as D1Database;
+    await expect(reconcile(db, bucket, settings, fetcher, now)).rejects.toThrow(
+      "D1 unavailable",
+    );
+    expect(
+      (await client.execute("SELECT * FROM import_events")).rows,
+    ).toHaveLength(0);
+  });
   it("records missing projection as technical import state without importing legacy HTML", async () => {
     const original = fetcher;
     fetcher = (async (url: string, init?: RequestInit) =>
@@ -517,9 +666,10 @@ describe("validated private reconciliation", () => {
             ],
           })
         : original(url, init)) as typeof fetch;
-    await expect(reconcile(db, bucket, settings, fetcher, now)).rejects.toThrow(
-      "Private import rejected",
-    );
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT code FROM import_events")).rows,
+    ).toEqual([{ code: "import_failed" }]);
     expect((await client.execute("SELECT * FROM scan_runs")).rows).toHaveLength(
       0,
     );
@@ -587,9 +737,10 @@ describe("validated private reconciliation", () => {
             ).buffer,
           )
         : original(url, init)) as typeof fetch;
-    await expect(
-      reconcile(db, bucket, settings, fetcher, now),
-    ).rejects.toThrow();
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT code FROM import_events")).rows,
+    ).toEqual([{ code: "import_failed" }]);
     expect(
       (await client.execute("SELECT * FROM artifact_index")).rows,
     ).toHaveLength(0);
@@ -607,9 +758,10 @@ describe("validated private reconciliation", () => {
             ).buffer,
           )
         : original(url, init)) as typeof fetch;
-    await expect(reconcile(db, bucket, settings, fetcher, now)).rejects.toThrow(
-      "Private import rejected",
-    );
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT code FROM import_events")).rows,
+    ).toEqual([{ code: "import_failed" }]);
     expect(
       (await client.execute("SELECT * FROM artifact_index")).rows,
     ).toHaveLength(0);
@@ -626,9 +778,10 @@ describe("validated private reconciliation", () => {
             ).buffer,
           )
         : original(url, init)) as typeof fetch;
-    await expect(reconcile(db, bucket, settings, fetcher, now)).rejects.toThrow(
-      "Private import rejected",
-    );
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT code FROM import_events")).rows,
+    ).toEqual([{ code: "import_failed" }]);
   });
   it("follows only trusted signed archive redirects without forwarding the App token", async () => {
     const original = fetcher;

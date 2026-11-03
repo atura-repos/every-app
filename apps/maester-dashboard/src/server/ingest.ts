@@ -8,6 +8,36 @@ const MAX_API_JSON = 256 * 1024; // GitHub run metadata is far larger than the s
 function fail(): never {
   throw new Error("Private import rejected");
 }
+class ImportFailure extends Error {
+  constructor() {
+    super("Private import rejected");
+  }
+}
+// Only external data/IO errors are isolated; never suppress D1 failures.
+async function external<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch {
+    throw new ImportFailure();
+  }
+}
+function externalReject(): never {
+  throw new ImportFailure();
+}
+async function event(db: D1Database, id: string, tenant: string, now: Date) {
+  await db
+    .prepare(
+      "INSERT INTO import_events(id,tenant_id,code,observed_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET code=excluded.code,observed_at=excluded.observed_at WHERE tenant_id=excluded.tenant_id",
+    )
+    .bind(id, tenant, "import_failed", now.toISOString())
+    .run();
+}
+async function resolved(db: D1Database, id: string, tenant: string) {
+  await db
+    .prepare("DELETE FROM import_events WHERE id=? AND tenant_id=?")
+    .bind(id, tenant)
+    .run();
+}
 const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
 const keys = (value: Record<string, unknown>, allowed: string[]) =>
@@ -385,16 +415,41 @@ export async function reconcile(
       !/^refs\/heads\/[a-zA-Z0-9_.\/-]+$/.test(source.workflow_ref)
     )
       fail();
-    const token = await installationToken(fetcher, settings, source);
-    const base = `${API}/repos/${source.owner}/${source.repo}`;
-    for (let page = 1; page <= 10; page++) {
-      const runs = await json(
-        fetcher,
-        `${base}/actions/workflows/${source.workflow_id}/runs?status=completed&per_page=10&page=${page}`,
-        token,
+    const sourceEvent = `${source.repo_id}:${source.workflow_id}:source`;
+    let token: string;
+    try {
+      token = await external(() =>
+        installationToken(fetcher, settings, source),
       );
-      if (!Array.isArray(runs.workflow_runs) || runs.workflow_runs.length > 10)
-        fail();
+    } catch (error) {
+      if (!(error instanceof ImportFailure)) throw error;
+      await event(db, sourceEvent, source.tenant_id, now);
+      continue;
+    }
+    const base = `${API}/repos/${source.owner}/${source.repo}`;
+    let sourceFailed = false;
+    for (let page = 1; page <= 10; page++) {
+      let runs: Record<string, unknown> & { workflow_runs: unknown[] };
+      try {
+        const response = await external(() =>
+          json(
+            fetcher,
+            `${base}/actions/workflows/${source.workflow_id}/runs?status=completed&per_page=10&page=${page}`,
+            token,
+          ),
+        );
+        if (
+          !Array.isArray(response.workflow_runs) ||
+          response.workflow_runs.length > 10
+        )
+          externalReject();
+        runs = response as typeof runs;
+      } catch (error) {
+        if (!(error instanceof ImportFailure)) throw error;
+        await event(db, sourceEvent, source.tenant_id, now);
+        sourceFailed = true;
+        break;
+      }
       for (const run of runs.workflow_runs) {
         if (
           !record(run) ||
@@ -445,162 +500,195 @@ export async function reconcile(
             .run();
           continue;
         }
-        const artifacts = await json(
-          fetcher,
-          `${base}/actions/runs/${run.id}/artifacts?per_page=100`,
-          token,
-        );
-        if (
-          !Array.isArray(artifacts.artifacts) ||
-          artifacts.artifacts.length > 100
-        )
-          fail();
-        const matches = artifacts.artifacts.filter(
-          (a) =>
-            record(a) &&
-            a.name === `${source.artifact_name}-${run.id}` &&
-            !a.expired,
-        );
-        if (matches.length > 1) fail();
-        if (!matches.length) {
-          await db
-            .prepare(
-              "INSERT OR IGNORE INTO import_events(id,tenant_id,code,observed_at) VALUES (?,?,?,?)",
-            )
-            .bind(
-              `${source.repo_id}:${run.id}:${run.run_attempt}`,
-              source.tenant_id,
-              "projection_missing",
-              now.toISOString(),
-            )
-            .run();
-          continue;
-        }
-        const artifact = matches[0] as Record<string, unknown>;
-        const legacyName = `${source.artifact_name.replace(/-dashboard$/, "")}-${run.id}`;
-        const legacy = artifacts.artifacts.filter(
-          (a) =>
-            record(a) &&
-            a.name === legacyName &&
-            !a.expired &&
-            record(a.workflow_run) &&
-            a.workflow_run.id === run.id &&
-            a.workflow_run.head_repository_id === source.repo_id,
-        );
-        if (legacy.length !== 1) fail();
-        if (
-          !int(artifact.id) ||
-          !int(artifact.size_in_bytes) ||
-          artifact.size_in_bytes > MAX_ZIP ||
-          !record(artifact.workflow_run) ||
-          artifact.workflow_run.id !== run.id ||
-          artifact.workflow_run.head_repository_id !== source.repo_id
-        )
-          fail();
-        const id = `${source.repo_id}:${run.id}:${run.run_attempt}:${artifact.id}`;
-        if (
-          await db
-            .prepare("SELECT id FROM artifact_index WHERE id=?")
-            .bind(id)
-            .first()
-        )
-          continue;
-        const bytes = extractProjection(
-          await download(
-            fetcher,
-            `${base}/actions/artifacts/${artifact.id}/zip`,
-            token,
-          ),
-        );
-        const projection = validateExport(safeParse(bytes), source.tenant_id);
-        const hash = await digest(bytes);
-        const objectKey = `${source.tenant_id}/${crypto.randomUUID()}`;
-        await bucket.put(objectKey, bytes);
-        const read = await bucket.get(objectKey);
-        if (
-          !read ||
-          (await digest(new Uint8Array(await read.arrayBuffer()))) !== hash
-        ) {
-          await bucket.delete(objectKey);
-          fail();
-        }
-        let batchStarted = false;
+        const runEvent = `${source.repo_id}:${run.id}:${run.run_attempt}`;
         try {
-          const expires = new Date(run.created_at as string);
-          expires.setUTCFullYear(expires.getUTCFullYear() + 1);
-          const statements = [
-            db
-              .prepare(
-                "INSERT INTO scan_runs(id,tenant_id,suite,benchmark,schema_version,started_at,scan_status,workflow_conclusion,expected_test_ids) VALUES (?,?,?,?,?,?,?,?,?)",
-              )
-              .bind(
-                id,
-                source.tenant_id,
-                source.artifact_name === "maester-atura-dashboard"
-                  ? "daily"
-                  : "cis",
-                source.artifact_name,
-                1,
-                run.created_at,
-                projection.scan_status,
-                run.conclusion,
-                JSON.stringify(projection.expected_test_ids),
-              ),
-            ...projection.controls.map((c) =>
-              db
-                .prepare(
-                  "INSERT INTO control_results(run_id,tenant_id,test_id,title,result) VALUES (?,?,?,?,?)",
-                )
-                .bind(id, source.tenant_id, c.id, c.id, c.result),
+          const artifacts = await external(() =>
+            json(
+              fetcher,
+              `${base}/actions/runs/${run.id}/artifacts?per_page=100`,
+              token,
             ),
-            db
+          );
+          if (
+            !Array.isArray(artifacts.artifacts) ||
+            artifacts.artifacts.length > 100
+          )
+            externalReject();
+          const matches = artifacts.artifacts.filter(
+            (a) =>
+              record(a) &&
+              a.name === `${source.artifact_name}-${run.id}` &&
+              !a.expired,
+          );
+          if (matches.length > 1) externalReject();
+          if (!matches.length) {
+            await db
               .prepare(
-                "INSERT INTO artifact_index(id,tenant_id,run_id,object_key,digest,expires_at) VALUES (?,?,?,?,?,?)",
+                "INSERT OR IGNORE INTO import_events(id,tenant_id,code,observed_at) VALUES (?,?,?,?)",
               )
               .bind(
-                id,
+                `${source.repo_id}:${run.id}:${run.run_attempt}`,
                 source.tenant_id,
-                id,
-                objectKey,
-                hash,
-                expires.toISOString(),
-              ),
-          ];
-          batchStarted = true;
-          await db.batch(statements);
-          const row = await db
+                "projection_missing",
+                now.toISOString(),
+              )
+              .run();
+            continue;
+          }
+          const artifact = matches[0] as Record<string, unknown>;
+          const legacyName = `${source.artifact_name.replace(/-dashboard$/, "")}-${run.id}`;
+          const legacy = artifacts.artifacts.filter(
+            (a) =>
+              record(a) &&
+              a.name === legacyName &&
+              !a.expired &&
+              record(a.workflow_run) &&
+              a.workflow_run.id === run.id &&
+              a.workflow_run.head_repository_id === source.repo_id,
+          );
+          if (legacy.length !== 1) externalReject();
+          if (
+            !int(artifact.id) ||
+            !int(artifact.size_in_bytes) ||
+            artifact.size_in_bytes > MAX_ZIP ||
+            !record(artifact.workflow_run) ||
+            artifact.workflow_run.id !== run.id ||
+            artifact.workflow_run.head_repository_id !== source.repo_id
+          )
+            externalReject();
+          const id = `${source.repo_id}:${run.id}:${run.run_attempt}:${artifact.id}`;
+          const indexed = await db
             .prepare(
-              "SELECT digest FROM artifact_index WHERE id=? AND tenant_id=?",
+              "SELECT digest,object_key FROM artifact_index WHERE id=? AND tenant_id=?",
             )
             .bind(id, source.tenant_id)
-            .first<{ digest: string }>();
-          if (row?.digest !== hash) fail();
-        } catch {
-          // A failed batch response/readback does not prove D1 rolled back.
-          // Keep R2: a committed index must never reference a deleted object.
-          if (!batchStarted) await bucket.delete(objectKey);
-          else {
-            try {
-              await db
+            .first<{ digest: string; object_key: string }>();
+          if (indexed) {
+            const read = await external(() => bucket.get(indexed.object_key));
+            if (
+              !read ||
+              (await external(async () =>
+                digest(new Uint8Array(await read.arrayBuffer())),
+              )) !== indexed.digest
+            )
+              externalReject();
+            await resolved(db, `${id}:readback`, source.tenant_id);
+            await resolved(db, runEvent, source.tenant_id);
+            continue;
+          }
+          const bytes = await external(async () =>
+            extractProjection(
+              await download(
+                fetcher,
+                `${base}/actions/artifacts/${artifact.id}/zip`,
+                token,
+              ),
+            ),
+          );
+          const projection = await external(async () =>
+            validateExport(safeParse(bytes), source.tenant_id),
+          );
+          const hash = await digest(bytes);
+          const objectKey = `${source.tenant_id}/${crypto.randomUUID()}`;
+          try {
+            await external(() => bucket.put(objectKey, bytes));
+            const read = await external(() => bucket.get(objectKey));
+            if (
+              !read ||
+              (await external(async () =>
+                digest(new Uint8Array(await read.arrayBuffer())),
+              )) !== hash
+            )
+              externalReject();
+          } catch (error) {
+            // No D1 batch has begun: a partial R2 write cannot be referenced.
+            await external(() => bucket.delete(objectKey));
+            throw error;
+          }
+          let batchStarted = false;
+          try {
+            const expires = new Date(run.created_at as string);
+            expires.setUTCFullYear(expires.getUTCFullYear() + 1);
+            const statements = [
+              db
                 .prepare(
-                  "INSERT OR IGNORE INTO import_events(id,tenant_id,code,observed_at) VALUES (?,?,?,?)",
+                  "INSERT INTO scan_runs(id,tenant_id,suite,benchmark,schema_version,started_at,scan_status,workflow_conclusion,expected_test_ids) VALUES (?,?,?,?,?,?,?,?,?)",
                 )
                 .bind(
-                  `${id}:readback`,
+                  id,
                   source.tenant_id,
-                  "readback_unverified",
-                  now.toISOString(),
+                  source.artifact_name === "maester-atura-dashboard"
+                    ? "daily"
+                    : "cis",
+                  source.artifact_name,
+                  1,
+                  run.created_at,
+                  projection.scan_status,
+                  run.conclusion,
+                  JSON.stringify(projection.expected_test_ids),
+                ),
+              ...projection.controls.map((c) =>
+                db
+                  .prepare(
+                    "INSERT INTO control_results(run_id,tenant_id,test_id,title,result) VALUES (?,?,?,?,?)",
+                  )
+                  .bind(id, source.tenant_id, c.id, c.id, c.result),
+              ),
+              db
+                .prepare(
+                  "INSERT INTO artifact_index(id,tenant_id,run_id,object_key,digest,expires_at) VALUES (?,?,?,?,?,?)",
                 )
-                .run();
-            } catch {
-              /* D1 may be unavailable; preserve R2 regardless. */
+                .bind(
+                  id,
+                  source.tenant_id,
+                  id,
+                  objectKey,
+                  hash,
+                  expires.toISOString(),
+                ),
+            ];
+            batchStarted = true;
+            await db.batch(statements);
+            const row = await db
+              .prepare(
+                "SELECT digest FROM artifact_index WHERE id=? AND tenant_id=?",
+              )
+              .bind(id, source.tenant_id)
+              .first<{ digest: string }>();
+            if (row?.digest !== hash) fail();
+            await resolved(db, `${id}:readback`, source.tenant_id);
+            await resolved(db, runEvent, source.tenant_id);
+          } catch {
+            // A failed batch response/readback does not prove D1 rolled back.
+            // Keep R2: a committed index must never reference a deleted object.
+            if (!batchStarted) await bucket.delete(objectKey);
+            else {
+              try {
+                await db
+                  .prepare(
+                    "INSERT OR IGNORE INTO import_events(id,tenant_id,code,observed_at) VALUES (?,?,?,?)",
+                  )
+                  .bind(
+                    `${id}:readback`,
+                    source.tenant_id,
+                    "readback_unverified",
+                    now.toISOString(),
+                  )
+                  .run();
+              } catch {
+                /* D1 may be unavailable; preserve R2 regardless. */
+              }
             }
+            fail();
           }
-          fail();
+        } catch (error) {
+          if (!(error instanceof ImportFailure)) throw error;
+          await event(db, runEvent, source.tenant_id, now);
         }
       }
       if (runs.workflow_runs.length < 10) break;
     }
+    if (!sourceFailed) await resolved(db, sourceEvent, source.tenant_id);
   }
 }
 
