@@ -88,6 +88,7 @@ export const scanRuns = sqliteTable(
     }).notNull(),
     workflowConclusion: text("workflow_conclusion"),
     expectedTestIds: text("expected_test_ids").notNull(),
+    retentionLock: integer("retention_lock").notNull().default(0),
   },
   (table) => [
     index("scan_runs_tenant_suite_started_idx").on(

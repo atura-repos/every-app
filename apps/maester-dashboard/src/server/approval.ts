@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   controlResults,
@@ -148,11 +148,9 @@ export async function createConcept(
   if (previous.status !== "not_created") return previous;
   const bytes = await renderReport(fields);
   const pdfSha256 = await sha256(bytes);
-  // Digest is hex, so no tenant or run identifier is used as an object-key path.
-  const objectKey = `reports/${fields.digest}/${pdfSha256}.pdf`;
-  await bucket.put(objectKey, bytes, {
-    httpMetadata: { contentType: "application/pdf" },
-  });
+  // Per-attempt suffix prevents one racing creator from deleting another's
+  // content-addressed PDF while the unique D1 digest row is being chosen.
+  const objectKey = `reports/${fields.digest}/${pdfSha256}-${crypto.randomUUID()}.pdf`;
   const storedVersion = async () =>
     (
       await db
@@ -164,17 +162,30 @@ export async function createConcept(
         .limit(1)
     )[0];
   try {
-    await db
-      .insert(reportVersions)
-      .values({
-        tenantId,
-        runId,
-        digest: fields.digest,
-        objectKey,
-        pdfSha256,
-        createdAt: new Date().toISOString(),
-      })
-      .onConflictDoNothing();
+    await bucket.put(objectKey, bytes, {
+      httpMetadata: { contentType: "application/pdf" },
+    });
+  } catch (error) {
+    // R2 may have written bytes before reporting failure; do not remove a
+    // concurrent creator's indexed object at the same content-addressed key.
+    const committed = await storedVersion();
+    if (committed?.objectKey !== objectKey) await bucket.delete(objectKey);
+    throw error;
+  }
+  const cutoff = new Date();
+  cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 1);
+  try {
+    // This SQL statement races atomically with retention's scan-run lock.
+    // An old/locked run cannot acquire a PDF row even if rendering began earlier.
+    await db.run(sql`
+      INSERT INTO report_versions
+        (tenant_id, run_id, digest, object_key, pdf_sha256, created_at)
+      SELECT ${tenantId}, ${runId}, ${fields.digest}, ${objectKey}, ${pdfSha256}, ${new Date().toISOString()}
+      FROM scan_runs
+      WHERE id = ${runId} AND tenant_id = ${tenantId}
+        AND retention_lock = 0 AND started_at > ${cutoff.toISOString()}
+      ON CONFLICT DO NOTHING
+    `);
   } catch (error) {
     // A failed D1 write might have committed. Never delete a referenced object.
     const committed = await storedVersion();
@@ -185,7 +196,7 @@ export async function createConcept(
   const committed = await storedVersion();
   if (!committed) {
     await bucket.delete(objectKey);
-    throw new Error("Concept was not saved");
+    throw new Error("Retention in progress");
   }
   if (committed.objectKey !== objectKey) await bucket.delete(objectKey);
   return reportStatus(user, config, tenantId, runId);

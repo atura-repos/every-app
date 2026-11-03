@@ -621,6 +621,14 @@ export async function expireImports(
       object_key: string;
     }>();
   for (const item of results) {
+    // Block new PDF versions before enumerating R2 keys; creation's conditional
+    // INSERT atomically checks this row so an interleaving cannot orphan a PDF.
+    await db
+      .prepare(
+        "UPDATE scan_runs SET retention_lock=1 WHERE id=? AND tenant_id=?",
+      )
+      .bind(item.run_id, item.tenant_id)
+      .run();
     const { results: reports } = await db
       .prepare(
         "SELECT object_key FROM report_versions WHERE run_id=? AND tenant_id=?",
@@ -628,7 +636,11 @@ export async function expireImports(
       .bind(item.run_id, item.tenant_id)
       .all<{ object_key: string }>();
     for (const report of reports) {
-      if (!/^reports\/[a-f0-9]{64}\/[a-f0-9]{64}\.pdf$/.test(report.object_key))
+      if (
+        !/^reports\/[a-f0-9]{64}\/[a-f0-9]{64}(?:-[a-f0-9-]{36})?\.pdf$/.test(
+          report.object_key,
+        )
+      )
         fail();
       await bucket.delete(report.object_key);
       if (await bucket.get(report.object_key)) fail();

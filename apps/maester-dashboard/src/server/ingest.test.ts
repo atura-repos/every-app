@@ -694,6 +694,30 @@ describe("validated private reconciliation", () => {
       (await client.execute("SELECT * FROM retention_events")).rows,
     ).toHaveLength(1);
   });
+  it("retries an interrupted R2 retention deletion without unlocking the run", async () => {
+    await reconcile(db, bucket, settings, fetcher, now);
+    const priorDelete = bucket.delete.bind(bucket);
+    let first = true;
+    bucket.delete = (async (key: string) => {
+      if (first) {
+        first = false;
+        throw new Error("R2 unavailable");
+      }
+      return priorDelete(key);
+    }) as R2Bucket["delete"];
+    const future = new Date("2027-11-04T00:00:00Z");
+    await expect(expireImports(db, bucket, future)).rejects.toThrow(
+      "R2 unavailable",
+    );
+    const rows = (await client.execute("SELECT retention_lock FROM scan_runs"))
+      .rows;
+    expect(rows).toEqual([{ retention_lock: 1 }]);
+    await expireImports(db, bucket, future);
+    expect((await client.execute("SELECT * FROM scan_runs")).rows).toHaveLength(
+      0,
+    );
+    expect(objects.size).toBe(0);
+  });
   it("deletes expired R2 objects and rows with audit readback", async () => {
     await reconcile(db, bucket, settings, fetcher, now);
     await client.execute({
@@ -701,6 +725,14 @@ describe("validated private reconciliation", () => {
       args: ["old", "atura", "projection_missing", "2026-11-02T00:00:00Z"],
     });
     const future = new Date("2027-11-04T00:00:00Z");
+    const priorDelete = bucket.delete.bind(bucket);
+    bucket.delete = (async (key: string) => {
+      const lock = (
+        await client.execute("SELECT retention_lock FROM scan_runs")
+      ).rows[0].retention_lock;
+      expect(lock).toBe(1);
+      return priorDelete(key);
+    }) as R2Bucket["delete"];
     await expireImports(db, bucket, future);
     expect((await client.execute("SELECT * FROM scan_runs")).rows).toHaveLength(
       0,

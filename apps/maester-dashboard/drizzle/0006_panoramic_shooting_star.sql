@@ -1,0 +1,1 @@
+ALTER TABLE `scan_runs` ADD `retention_lock` integer DEFAULT 0 NOT NULL;

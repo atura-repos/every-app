@@ -61,6 +61,7 @@ const run = (
   scanStatus,
   workflowConclusion: "failure",
   expectedTestIds: JSON.stringify(expectedTestIds),
+  retentionLock: 0,
 });
 const control = (
   runId: string,

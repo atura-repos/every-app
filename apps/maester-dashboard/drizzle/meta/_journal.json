@@ -43,6 +43,13 @@
       "when": 1793721169818,
       "tag": "0005_dry_cassandra_nova",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793721513270,
+      "tag": "0006_panoramic_shooting_star",
+      "breakpoints": true
     }
   ]
 }

@@ -118,8 +118,58 @@ describe("versioned report authorization and audit", () => {
       ),
     ).toEqual(["pilot"]);
   });
+  it("keeps only the indexed PDF after two concurrent concept creations", async () => {
+    let arrivals = 0;
+    let release!: () => void;
+    const bothUploaded = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const put = bucket.put.getMockImplementation()!;
+    bucket.put.mockImplementation(async (key: string, bytes: Uint8Array) => {
+      await put(key, bytes);
+      if (++arrivals === 2) release();
+      await bothUploaded;
+    });
+    const versions = await Promise.all([
+      createConcept(user, config, bucket, "tenant", "run"),
+      createConcept(user, config, bucket, "tenant", "run"),
+    ]);
+    expect(versions.map((v) => v.status)).toEqual(["concept", "concept"]);
+    const rows = await db.select().from(schema.reportVersions);
+    expect(rows).toHaveLength(1);
+    expect(objects.size).toBe(1);
+    expect(objects.has(rows[0].objectKey)).toBe(true);
+  });
+  it("cleans a partially uploaded PDF when R2 put reports a failure", async () => {
+    const put = bucket.put.getMockImplementation()!;
+    bucket.put.mockImplementationOnce(
+      async (key: string, bytes: Uint8Array) => {
+        await put(key, bytes);
+        throw new Error("R2 put interrupted");
+      },
+    );
+    await expect(
+      createConcept(user, config, bucket, "tenant", "run"),
+    ).rejects.toThrow("R2 put interrupted");
+    expect(objects.size).toBe(0);
+    expect(await db.select().from(schema.reportVersions)).toHaveLength(0);
+  });
+  it("does not leave a PDF behind when retention starts during concept rendering", async () => {
+    const put = bucket.put.getMockImplementation()!;
+    bucket.put.mockImplementationOnce(
+      async (key: string, bytes: Uint8Array) => {
+        await put(key, bytes);
+        await db.run("UPDATE scan_runs SET retention_lock=1 WHERE id='run'");
+      },
+    );
+    await expect(
+      createConcept(user, config, bucket, "tenant", "run"),
+    ).rejects.toThrow("Retention in progress");
+    expect(objects.size).toBe(0);
+    expect(await db.select().from(schema.reportVersions)).toHaveLength(0);
+  });
   it("cleans R2 when saving the concept version fails before D1 commits", async () => {
-    const insert = vi.spyOn(db, "insert").mockImplementation(() => {
+    const insert = vi.spyOn(db, "run").mockImplementation(() => {
       throw new Error("D1 unavailable");
     });
     try {
