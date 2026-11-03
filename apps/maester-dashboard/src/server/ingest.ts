@@ -403,9 +403,13 @@ export async function reconcile(
   for (const source of results) {
     if (
       !int(source.repo_id) ||
-      !int(source.installation_id) ||
       !int(source.workflow_id) ||
-      !tokenSafe(source.tenant_id) ||
+      !tokenSafe(source.tenant_id)
+    )
+      fail(); // without a trusted tenant/source identity, no scoped event is possible
+    const sourceEvent = `${source.repo_id}:${source.workflow_id}:source`;
+    if (
+      !int(source.installation_id) ||
       !tokenSafe(source.owner) ||
       !tokenSafe(source.repo) ||
       !tokenSafe(source.artifact_name) ||
@@ -413,9 +417,10 @@ export async function reconcile(
         source.workflow_path,
       ) ||
       !/^refs\/heads\/[a-zA-Z0-9_.\/-]+$/.test(source.workflow_ref)
-    )
-      fail();
-    const sourceEvent = `${source.repo_id}:${source.workflow_id}:source`;
+    ) {
+      await event(db, sourceEvent, source.tenant_id, now);
+      continue;
+    }
     let token: string;
     try {
       token = await external(() =>
@@ -456,8 +461,11 @@ export async function reconcile(
           !int(run.id) ||
           !int(run.run_attempt) ||
           run.run_attempt < 1
-        )
-          fail();
+        ) {
+          await event(db, sourceEvent, source.tenant_id, now);
+          sourceFailed = true;
+          continue;
+        }
         if (
           run.status !== "completed" ||
           !["push", "workflow_dispatch", "schedule"].includes(
@@ -639,6 +647,16 @@ export async function reconcile(
           );
           const hash = await digest(bytes);
           const objectKey = `${source.tenant_id}/${crypto.randomUUID()}`;
+          // Persist the retention index before any R2 write. Even an uncertain
+          // D1 batch cannot strand bytes outside the one-year cleanup path.
+          const expires = new Date(run.created_at as string);
+          expires.setUTCFullYear(expires.getUTCFullYear() + 1);
+          await db
+            .prepare(
+              "INSERT INTO pending_r2_objects(object_key,tenant_id,expires_at) VALUES (?,?,?)",
+            )
+            .bind(objectKey, source.tenant_id, expires.toISOString())
+            .run();
           try {
             await external(() => bucket.put(objectKey, bytes));
             const read = await external(() => bucket.get(objectKey));
@@ -656,8 +674,6 @@ export async function reconcile(
           }
           let batchStarted = false;
           try {
-            const expires = new Date(run.created_at as string);
-            expires.setUTCFullYear(expires.getUTCFullYear() + 1);
             const statements = [
               db
                 .prepare(
@@ -815,6 +831,30 @@ export async function expireImports(
         .first()
     )
       fail();
+  }
+  // Independently sweep pre-indexed uploads. This ledger survives a failed or
+  // uncertain scan-run batch, including cases with no artifact_index row.
+  const { results: pending } = await db
+    .prepare(
+      "SELECT object_key,tenant_id FROM pending_r2_objects WHERE expires_at<=? LIMIT 100",
+    )
+    .bind(now.toISOString())
+    .all<{ object_key: string; tenant_id: string }>();
+  for (const item of pending) {
+    if (
+      !tokenSafe(item.tenant_id) ||
+      !/^[-a-zA-Z0-9_]+\/[a-f0-9-]{36}$/.test(item.object_key) ||
+      !item.object_key.startsWith(`${item.tenant_id}/`)
+    )
+      fail();
+    await bucket.delete(item.object_key);
+    if (await bucket.get(item.object_key)) fail();
+    await db
+      .prepare(
+        "DELETE FROM pending_r2_objects WHERE object_key=? AND tenant_id=?",
+      )
+      .bind(item.object_key, item.tenant_id)
+      .run();
   }
   const cutoff = new Date(now);
   cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 1);

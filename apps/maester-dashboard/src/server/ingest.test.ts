@@ -527,6 +527,61 @@ describe("validated private reconciliation", () => {
       0,
     );
   });
+  it("records a malformed configured source while importing a later valid workflow", async () => {
+    await client.execute("DELETE FROM github_sources");
+    await client.execute(
+      "INSERT INTO github_sources(repo_id,workflow_id,workflow_ref,workflow_path,artifact_name,enabled) VALUES (42,11,'refs/heads/main','bad-path','maester-atura-dashboard',1)",
+    );
+    await client.execute(
+      "INSERT INTO github_sources(repo_id,workflow_id,workflow_ref,workflow_path,artifact_name,enabled) VALUES (42,12,'refs/heads/main','.github/workflows/maester.yml','maester-atura-dashboard',1)",
+    );
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect((await client.execute("SELECT * FROM scan_runs")).rows).toHaveLength(
+      1,
+    );
+    expect(
+      (await client.execute("SELECT code FROM import_events")).rows,
+    ).toEqual([{ code: "import_failed" }]);
+  });
+  it("records a malformed run while importing a later valid run", async () => {
+    const original = fetcher;
+    fetcher = (async (url: string, init?: RequestInit) => {
+      if (url.includes("/runs?")) {
+        const response = await original(url, init);
+        const payload = (await response.json()) as { workflow_runs: unknown[] };
+        return Response.json({
+          ...payload,
+          workflow_runs: [{ status: "completed" }, ...payload.workflow_runs],
+        });
+      }
+      return original(url, init);
+    }) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect((await client.execute("SELECT * FROM scan_runs")).rows).toHaveLength(
+      1,
+    );
+    expect(
+      (await client.execute("SELECT code FROM import_events")).rows,
+    ).toEqual([{ code: "import_failed" }]);
+  });
+  it("expires an unindexed R2 upload left by an uncertain D1 batch", async () => {
+    const actual = db;
+    db = {
+      ...actual,
+      batch: async () => {
+        throw new Error("D1 batch interrupted");
+      },
+    } as unknown as D1Database;
+    await expect(reconcile(db, bucket, settings, fetcher, now)).rejects.toThrow(
+      "Private import rejected",
+    );
+    expect(objects.size).toBe(1);
+    db = actual;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(objects.size).toBe(2);
+    await expireImports(db, bucket, new Date("2027-11-04T00:00:00Z"));
+    expect(objects.size).toBe(0);
+  });
   it("keeps R2 bytes when a committed D1 batch has a failed readback", async () => {
     const actual = db;
     db = {
@@ -906,10 +961,8 @@ describe("validated private reconciliation", () => {
     const future = new Date("2027-11-04T00:00:00Z");
     const priorDelete = bucket.delete.bind(bucket);
     bucket.delete = (async (key: string) => {
-      const lock = (
-        await client.execute("SELECT retention_lock FROM scan_runs")
-      ).rows[0].retention_lock;
-      expect(lock).toBe(1);
+      const rows = await client.execute("SELECT retention_lock FROM scan_runs");
+      if (rows.rows.length) expect(rows.rows[0].retention_lock).toBe(1);
       return priorDelete(key);
     }) as R2Bucket["delete"];
     await expireImports(db, bucket, future);

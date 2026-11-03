@@ -46,6 +46,13 @@ export const artifactIndex = sqliteTable("artifact_index", {
   digest: text("digest").notNull(),
   expiresAt: text("expires_at").notNull(),
 });
+export const pendingR2Objects = sqliteTable("pending_r2_objects", {
+  objectKey: text("object_key").primaryKey(),
+  tenantId: text("tenant_id")
+    .notNull()
+    .references(() => tenantRegistry.id),
+  expiresAt: text("expires_at").notNull(),
+});
 export const importEvents = sqliteTable("import_events", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id")
