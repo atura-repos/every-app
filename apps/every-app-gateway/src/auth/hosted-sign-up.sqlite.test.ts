@@ -129,7 +129,7 @@ function mailsTo(email: string, subject?: string): Mail[] {
   );
 }
 
-const VERIFY_SUBJECT = "Verify your EveryApp email";
+const VERIFY_SUBJECT = "Verify your Atura Apps Portal email";
 
 /** The link in the latest verification mail to this address. */
 function verificationLink(email: string): string {

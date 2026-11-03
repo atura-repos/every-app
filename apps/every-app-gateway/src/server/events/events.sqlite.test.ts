@@ -401,7 +401,7 @@ describe("the event bus (SQLite)", () => {
         lastStatusCode: 200,
         event: expect.objectContaining({
           type: "ping",
-          summary: "Test event from EveryApp",
+          summary: "Test event from Atura Apps Portal",
         }),
       });
       expect(await deliveriesOf(other.subscription.id)).toHaveLength(0);
@@ -1570,7 +1570,7 @@ describe("the event bus (SQLite)", () => {
       expect(samples["provider.connection_expired"]!.dedupeKey).toBe(
         "provider.connection_expired:conn_1",
       );
-      expect(line("ping")).toBe("Test event from EveryApp");
+      expect(line("ping")).toBe("Test event from Atura Apps Portal");
       expect(line("member.invitation_cancelled")).toBe(
         "Ada cancelled the invitation for jo@acme.example",
       );
