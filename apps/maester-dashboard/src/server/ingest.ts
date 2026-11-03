@@ -4,6 +4,7 @@ import { Unzip, UnzipInflate } from "fflate";
 const API = "https://api.github.com";
 const MAX_ZIP = 256 * 1024;
 const MAX_JSON = 64 * 1024;
+const MAX_API_JSON = 256 * 1024; // GitHub run metadata is far larger than the safe projection.
 function fail(): never {
   throw new Error("Private import rejected");
 }
@@ -278,7 +279,10 @@ async function json(
   bearer: string,
   init: RequestInit = {},
 ): Promise<Record<string, unknown>> {
-  const data = await bounded(await api(fetcher, url, bearer, init), MAX_JSON);
+  const data = await bounded(
+    await api(fetcher, url, bearer, init),
+    MAX_API_JSON,
+  );
   const result: unknown = safeParse(data);
   if (!record(result)) fail();
   return result;
@@ -379,189 +383,192 @@ export async function reconcile(
       fail();
     const token = await installationToken(fetcher, settings, source);
     const base = `${API}/repos/${source.owner}/${source.repo}`;
-    const runs = await json(
-      fetcher,
-      `${base}/actions/workflows/${source.workflow_id}/runs?status=completed&per_page=100`,
-      token,
-    );
-    if (!Array.isArray(runs.workflow_runs) || runs.workflow_runs.length > 100)
-      fail();
-    for (const run of runs.workflow_runs) {
-      if (
-        !record(run) ||
-        !int(run.id) ||
-        !int(run.run_attempt) ||
-        run.run_attempt < 1
-      )
-        fail();
-      if (
-        run.status !== "completed" ||
-        !["push", "workflow_dispatch", "schedule"].includes(
-          run.event as string,
-        ) ||
-        !record(run.head_repository) ||
-        run.head_repository.id !== source.repo_id ||
-        run.head_branch !== source.workflow_ref.slice(11) ||
-        !/^[a-f0-9]{40}$/.test(run.head_sha as string) ||
-        !iso(run.created_at) ||
-        ![
-          "success",
-          "failure",
-          "cancelled",
-          "timed_out",
-          "action_required",
-          "neutral",
-          "skipped",
-        ].includes(run.conclusion as string)
-      )
-        continue;
-      // GitHub's artifact listing does not attest the producing attempt.
-      if (run.run_attempt !== 1) {
-        await db
-          .prepare(
-            "INSERT OR IGNORE INTO import_events(id,tenant_id,code,observed_at) VALUES (?,?,?,?)",
-          )
-          .bind(
-            `${source.repo_id}:${run.id}:${run.run_attempt}`,
-            source.tenant_id,
-            "attempt_unverifiable",
-            now.toISOString(),
-          )
-          .run();
-        continue;
-      }
-      const artifacts = await json(
+    for (let page = 1; page <= 10; page++) {
+      const runs = await json(
         fetcher,
-        `${base}/actions/runs/${run.id}/artifacts?per_page=100`,
+        `${base}/actions/workflows/${source.workflow_id}/runs?status=completed&per_page=10&page=${page}`,
         token,
       );
-      if (
-        !Array.isArray(artifacts.artifacts) ||
-        artifacts.artifacts.length > 100
-      )
+      if (!Array.isArray(runs.workflow_runs) || runs.workflow_runs.length > 10)
         fail();
-      const matches = artifacts.artifacts.filter(
-        (a) =>
-          record(a) &&
-          a.name === `${source.artifact_name}-${run.id}` &&
-          !a.expired,
-      );
-      if (matches.length > 1) fail();
-      if (!matches.length) {
-        await db
-          .prepare(
-            "INSERT OR IGNORE INTO import_events(id,tenant_id,code,observed_at) VALUES (?,?,?,?)",
-          )
-          .bind(
-            `${source.repo_id}:${run.id}:${run.run_attempt}`,
-            source.tenant_id,
-            "projection_missing",
-            now.toISOString(),
-          )
-          .run();
-        continue;
-      }
-      const artifact = matches[0] as Record<string, unknown>;
-      const legacyName = `${source.artifact_name.replace(/-dashboard$/, "")}-${run.id}`;
-      const legacy = artifacts.artifacts.filter(
-        (a) =>
-          record(a) &&
-          a.name === legacyName &&
-          !a.expired &&
-          record(a.workflow_run) &&
-          a.workflow_run.id === run.id &&
-          a.workflow_run.head_repository_id === source.repo_id,
-      );
-      if (legacy.length !== 1) fail();
-      if (
-        !int(artifact.id) ||
-        !int(artifact.size_in_bytes) ||
-        artifact.size_in_bytes > MAX_ZIP ||
-        !record(artifact.workflow_run) ||
-        artifact.workflow_run.id !== run.id ||
-        artifact.workflow_run.head_repository_id !== source.repo_id
-      )
-        fail();
-      const id = `${source.repo_id}:${run.id}:${run.run_attempt}:${artifact.id}`;
-      if (
-        await db
-          .prepare("SELECT id FROM artifact_index WHERE id=?")
-          .bind(id)
-          .first()
-      )
-        continue;
-      const bytes = extractProjection(
-        await download(
-          fetcher,
-          `${base}/actions/artifacts/${artifact.id}/zip`,
-          token,
-        ),
-      );
-      const projection = validateExport(safeParse(bytes), source.tenant_id);
-      const hash = await digest(bytes);
-      const objectKey = `${source.tenant_id}/${crypto.randomUUID()}`;
-      await bucket.put(objectKey, bytes);
-      const read = await bucket.get(objectKey);
-      if (
-        !read ||
-        (await digest(new Uint8Array(await read.arrayBuffer()))) !== hash
-      ) {
-        await bucket.delete(objectKey);
-        fail();
-      }
-      try {
-        const expires = new Date(run.created_at as string);
-        expires.setUTCFullYear(expires.getUTCFullYear() + 1);
-        const statements = [
-          db
+      for (const run of runs.workflow_runs) {
+        if (
+          !record(run) ||
+          !int(run.id) ||
+          !int(run.run_attempt) ||
+          run.run_attempt < 1
+        )
+          fail();
+        if (
+          run.status !== "completed" ||
+          !["push", "workflow_dispatch", "schedule"].includes(
+            run.event as string,
+          ) ||
+          !record(run.head_repository) ||
+          run.head_repository.id !== source.repo_id ||
+          run.head_branch !== source.workflow_ref.slice(11) ||
+          !/^[a-f0-9]{40}$/.test(run.head_sha as string) ||
+          !iso(run.created_at) ||
+          ![
+            "success",
+            "failure",
+            "cancelled",
+            "timed_out",
+            "action_required",
+            "neutral",
+            "skipped",
+          ].includes(run.conclusion as string)
+        )
+          continue;
+        // GitHub's artifact listing does not attest the producing attempt.
+        if (run.run_attempt !== 1) {
+          await db
             .prepare(
-              "INSERT INTO scan_runs(id,tenant_id,suite,benchmark,schema_version,started_at,scan_status,workflow_conclusion,expected_test_ids) VALUES (?,?,?,?,?,?,?,?,?)",
+              "INSERT OR IGNORE INTO import_events(id,tenant_id,code,observed_at) VALUES (?,?,?,?)",
             )
             .bind(
-              id,
+              `${source.repo_id}:${run.id}:${run.run_attempt}`,
               source.tenant_id,
-              source.artifact_name === "maester-atura-dashboard"
-                ? "daily"
-                : "cis",
-              source.artifact_name,
-              1,
-              run.created_at,
-              projection.scan_status,
-              run.conclusion,
-              JSON.stringify(projection.expected_test_ids),
-            ),
-          ...projection.controls.map((c) =>
+              "attempt_unverifiable",
+              now.toISOString(),
+            )
+            .run();
+          continue;
+        }
+        const artifacts = await json(
+          fetcher,
+          `${base}/actions/runs/${run.id}/artifacts?per_page=100`,
+          token,
+        );
+        if (
+          !Array.isArray(artifacts.artifacts) ||
+          artifacts.artifacts.length > 100
+        )
+          fail();
+        const matches = artifacts.artifacts.filter(
+          (a) =>
+            record(a) &&
+            a.name === `${source.artifact_name}-${run.id}` &&
+            !a.expired,
+        );
+        if (matches.length > 1) fail();
+        if (!matches.length) {
+          await db
+            .prepare(
+              "INSERT OR IGNORE INTO import_events(id,tenant_id,code,observed_at) VALUES (?,?,?,?)",
+            )
+            .bind(
+              `${source.repo_id}:${run.id}:${run.run_attempt}`,
+              source.tenant_id,
+              "projection_missing",
+              now.toISOString(),
+            )
+            .run();
+          continue;
+        }
+        const artifact = matches[0] as Record<string, unknown>;
+        const legacyName = `${source.artifact_name.replace(/-dashboard$/, "")}-${run.id}`;
+        const legacy = artifacts.artifacts.filter(
+          (a) =>
+            record(a) &&
+            a.name === legacyName &&
+            !a.expired &&
+            record(a.workflow_run) &&
+            a.workflow_run.id === run.id &&
+            a.workflow_run.head_repository_id === source.repo_id,
+        );
+        if (legacy.length !== 1) fail();
+        if (
+          !int(artifact.id) ||
+          !int(artifact.size_in_bytes) ||
+          artifact.size_in_bytes > MAX_ZIP ||
+          !record(artifact.workflow_run) ||
+          artifact.workflow_run.id !== run.id ||
+          artifact.workflow_run.head_repository_id !== source.repo_id
+        )
+          fail();
+        const id = `${source.repo_id}:${run.id}:${run.run_attempt}:${artifact.id}`;
+        if (
+          await db
+            .prepare("SELECT id FROM artifact_index WHERE id=?")
+            .bind(id)
+            .first()
+        )
+          continue;
+        const bytes = extractProjection(
+          await download(
+            fetcher,
+            `${base}/actions/artifacts/${artifact.id}/zip`,
+            token,
+          ),
+        );
+        const projection = validateExport(safeParse(bytes), source.tenant_id);
+        const hash = await digest(bytes);
+        const objectKey = `${source.tenant_id}/${crypto.randomUUID()}`;
+        await bucket.put(objectKey, bytes);
+        const read = await bucket.get(objectKey);
+        if (
+          !read ||
+          (await digest(new Uint8Array(await read.arrayBuffer()))) !== hash
+        ) {
+          await bucket.delete(objectKey);
+          fail();
+        }
+        try {
+          const expires = new Date(run.created_at as string);
+          expires.setUTCFullYear(expires.getUTCFullYear() + 1);
+          const statements = [
             db
               .prepare(
-                "INSERT INTO control_results(run_id,tenant_id,test_id,title,result) VALUES (?,?,?,?,?)",
+                "INSERT INTO scan_runs(id,tenant_id,suite,benchmark,schema_version,started_at,scan_status,workflow_conclusion,expected_test_ids) VALUES (?,?,?,?,?,?,?,?,?)",
               )
-              .bind(id, source.tenant_id, c.id, c.id, c.result),
-          ),
-          db
-            .prepare(
-              "INSERT INTO artifact_index(id,tenant_id,run_id,object_key,digest,expires_at) VALUES (?,?,?,?,?,?)",
-            )
-            .bind(
-              id,
-              source.tenant_id,
-              id,
-              objectKey,
-              hash,
-              expires.toISOString(),
+              .bind(
+                id,
+                source.tenant_id,
+                source.artifact_name === "maester-atura-dashboard"
+                  ? "daily"
+                  : "cis",
+                source.artifact_name,
+                1,
+                run.created_at,
+                projection.scan_status,
+                run.conclusion,
+                JSON.stringify(projection.expected_test_ids),
+              ),
+            ...projection.controls.map((c) =>
+              db
+                .prepare(
+                  "INSERT INTO control_results(run_id,tenant_id,test_id,title,result) VALUES (?,?,?,?,?)",
+                )
+                .bind(id, source.tenant_id, c.id, c.id, c.result),
             ),
-        ];
-        await db.batch(statements);
-        const row = await db
-          .prepare(
-            "SELECT digest FROM artifact_index WHERE id=? AND tenant_id=?",
-          )
-          .bind(id, source.tenant_id)
-          .first<{ digest: string }>();
-        if (row?.digest !== hash) fail();
-      } catch {
-        await bucket.delete(objectKey);
-        fail();
+            db
+              .prepare(
+                "INSERT INTO artifact_index(id,tenant_id,run_id,object_key,digest,expires_at) VALUES (?,?,?,?,?,?)",
+              )
+              .bind(
+                id,
+                source.tenant_id,
+                id,
+                objectKey,
+                hash,
+                expires.toISOString(),
+              ),
+          ];
+          await db.batch(statements);
+          const row = await db
+            .prepare(
+              "SELECT digest FROM artifact_index WHERE id=? AND tenant_id=?",
+            )
+            .bind(id, source.tenant_id)
+            .first<{ digest: string }>();
+          if (row?.digest !== hash) fail();
+        } catch {
+          await bucket.delete(objectKey);
+          fail();
+        }
       }
+      if (runs.workflow_runs.length < 10) break;
     }
   }
 }

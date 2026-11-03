@@ -241,6 +241,33 @@ describe("validated private reconciliation", () => {
       ),
     ).not.toThrow();
   });
+  it("paginates bounded run-list responses instead of requesting 100 oversized records", async () => {
+    const original = fetcher;
+    const pages: string[] = [];
+    fetcher = (async (url: string, init?: RequestInit) => {
+      if (url.includes("/workflows/12/runs")) {
+        pages.push(url);
+        if (!url.includes("per_page=10"))
+          return Response.json({ padding: "x".repeat(100_000) });
+        if (url.endsWith("&page=1"))
+          return Response.json({
+            padding: "x".repeat(100_000),
+            workflow_runs: Array.from({ length: 10 }, (_, i) => ({
+              id: 200 + i,
+              run_attempt: 1,
+              status: "queued",
+            })),
+          });
+      }
+      return original(url, init);
+    }) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(pages).toHaveLength(2);
+    expect(pages[1]).toContain("page=2");
+    expect((await client.execute("SELECT * FROM scan_runs")).rows).toHaveLength(
+      1,
+    );
+  });
   it("imports once with scoped short-lived token and reads back D1 and R2", async () => {
     await reconcile(db, bucket, settings, fetcher, now);
     await reconcile(db, bucket, settings, fetcher, now);
