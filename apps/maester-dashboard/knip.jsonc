@@ -1,0 +1,11 @@
+{
+  "entry": [
+    "everyapp.config.ts",
+    "cloudflare.config.ts",
+    "src/entry.worker.ts",
+    "src/router.tsx",
+    "src/routes/**/*.{ts,tsx}",
+  ],
+  "project": ["**/*.{ts,tsx}", "!src/routeTree.gen.ts"],
+  "ignoreDependencies": ["@every-app/sdk", "cloudflare", "tailwindcss"],
+}
