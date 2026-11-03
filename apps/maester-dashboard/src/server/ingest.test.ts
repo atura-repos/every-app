@@ -245,6 +245,55 @@ describe("validated private reconciliation", () => {
     ).toHaveLength(0);
     expect(objects.size).toBe(0);
   });
+  it("does not report an expired GitHub artifact missing when its indexed controlled copy is intact", async () => {
+    await reconcile(db, bucket, settings, fetcher, now);
+    const original = fetcher;
+    fetcher = (async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/runs/100/artifacts?per_page=100")) {
+        const payload = (await (await original(url, init)).json()) as {
+          artifacts: Record<string, unknown>[];
+        };
+        return Response.json({
+          artifacts: payload.artifacts.filter(
+            (artifact) => artifact.id !== 902,
+          ),
+        });
+      }
+      return original(url, init);
+    }) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT * FROM import_events")).rows,
+    ).toHaveLength(0);
+    expect(
+      (await client.execute("SELECT * FROM controlled_original_index")).rows,
+    ).toHaveLength(1);
+  });
+  it("records a safe status if the indexed copy is lost after GitHub artifact expiry", async () => {
+    await reconcile(db, bucket, settings, fetcher, now);
+    const key = (
+      await client.execute("SELECT object_key FROM controlled_original_index")
+    ).rows[0].object_key as string;
+    objects.delete(key);
+    const original = fetcher;
+    fetcher = (async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/runs/100/artifacts?per_page=100")) {
+        const payload = (await (await original(url, init)).json()) as {
+          artifacts: Record<string, unknown>[];
+        };
+        return Response.json({
+          artifacts: payload.artifacts.filter(
+            (artifact) => artifact.id !== 902,
+          ),
+        });
+      }
+      return original(url, init);
+    }) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT code FROM import_events")).rows,
+    ).toEqual([{ code: "controlled_missing" }]);
+  });
   it("records absent controlled artifact safely without blocking projection", async () => {
     const original = fetcher;
     fetcher = (async (url: string, init?: RequestInit) => {
@@ -402,6 +451,25 @@ describe("validated private reconciliation", () => {
       (await client.execute("SELECT * FROM controlled_original_index")).rows,
     ).toHaveLength(0);
     expect(objects.size).toBe(0);
+  });
+  it("does not resurrect indexed controlled bytes when expiry wins during repair", async () => {
+    await reconcile(db, bucket, settings, fetcher, now);
+    const rows = (
+      await client.execute("SELECT object_key FROM controlled_original_index")
+    ).rows;
+    const key = rows[0].object_key as string;
+    objects.delete(key);
+    const put = bucket.put.bind(bucket);
+    bucket.put = (async (objectKey: string, bytes: Uint8Array) => {
+      if (objectKey === key)
+        await expireImports(db, bucket, new Date("2027-11-04T00:00:00Z"));
+      return put(objectKey, bytes);
+    }) as R2Bucket["put"];
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(objects.has(key)).toBe(false);
+    expect(
+      (await client.execute("SELECT * FROM controlled_original_index")).rows,
+    ).toHaveLength(0);
   });
   it("isolates a broken ZIP, retries it next schedule, and clears the resolved event", async () => {
     const original = fetcher;

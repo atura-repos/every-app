@@ -466,7 +466,35 @@ async function importControlled(
           `${sourceName}-controlled-original-v1-${run.id}-${run.run_attempt}` &&
         a.expired === false,
     );
+    const indexed = await db
+      .prepare(
+        "SELECT c.artifact_id,c.object_key,c.digest,c.size,s.retention_lock FROM controlled_original_index c JOIN scan_runs s ON s.id=c.run_id AND s.tenant_id=c.tenant_id WHERE c.run_id=? AND c.tenant_id=?",
+      )
+      .bind(runId, source.tenant_id)
+      .first<{
+        artifact_id: number;
+        object_key: string;
+        digest: string;
+        size: number;
+        retention_lock: number;
+      }>();
+    if (indexed?.retention_lock) return;
     if (!matches.length) {
+      if (indexed) {
+        const existing = await external(() => bucket.get(indexed.object_key));
+        if (existing) {
+          const bytes = new Uint8Array(
+            await external(() => existing.arrayBuffer()),
+          );
+          if (
+            bytes.length === indexed.size &&
+            (await digest(bytes)) === indexed.digest
+          ) {
+            await resolved(db, statusId, source.tenant_id);
+            return;
+          }
+        }
+      }
       await db
         .prepare(
           "INSERT INTO import_events(id,tenant_id,code,observed_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET code=excluded.code,observed_at=excluded.observed_at WHERE tenant_id=excluded.tenant_id",
@@ -491,19 +519,6 @@ async function importControlled(
       artifact.workflow_run.head_repository_id !== source.repo_id
     )
       externalReject();
-    const indexed = await db
-      .prepare(
-        "SELECT c.artifact_id,c.object_key,c.digest,c.size,s.retention_lock FROM controlled_original_index c JOIN scan_runs s ON s.id=c.run_id AND s.tenant_id=c.tenant_id WHERE c.run_id=? AND c.tenant_id=?",
-      )
-      .bind(runId, source.tenant_id)
-      .first<{
-        artifact_id: number;
-        object_key: string;
-        digest: string;
-        size: number;
-        retention_lock: number;
-      }>();
-    if (indexed?.retention_lock) return;
     if (indexed && indexed.artifact_id !== artifact.id) externalReject();
     const projectionIndex = await db
       .prepare(
@@ -592,6 +607,17 @@ async function importControlled(
         .first();
       if (!pending) return;
     }
+    if (indexed) {
+      // Retention may lock and remove the old index while the archive is downloaded.
+      // The post-write check below closes the remaining put/delete race.
+      const active = await db
+        .prepare(
+          "SELECT 1 FROM controlled_original_index c JOIN scan_runs s ON s.id=c.run_id AND s.tenant_id=c.tenant_id JOIN pending_r2_objects p ON p.object_key=c.object_key AND p.tenant_id=c.tenant_id WHERE c.run_id=? AND c.tenant_id=? AND c.object_key=? AND s.retention_lock=0 AND s.started_at<?",
+        )
+        .bind(runId, source.tenant_id, objectKey, now.toISOString())
+        .first();
+      if (!active) return;
+    }
     try {
       await external(() => bucket.put(objectKey, bytes));
       const read = await external(() => bucket.get(objectKey));
@@ -603,8 +629,22 @@ async function importControlled(
       )
         externalReject();
     } catch (error) {
-      if (!indexed) await external(() => bucket.delete(objectKey));
+      await external(() => bucket.delete(objectKey));
       throw error;
+    }
+    if (indexed) {
+      // If expiry removed the index while R2 was writing, the old key is no
+      // longer tracked; discard these bytes instead of resurrecting an orphan.
+      const active = await db
+        .prepare(
+          "SELECT 1 FROM controlled_original_index c JOIN scan_runs s ON s.id=c.run_id AND s.tenant_id=c.tenant_id JOIN pending_r2_objects p ON p.object_key=c.object_key AND p.tenant_id=c.tenant_id WHERE c.run_id=? AND c.tenant_id=? AND c.object_key=? AND s.retention_lock=0 AND s.started_at<?",
+        )
+        .bind(runId, source.tenant_id, objectKey, now.toISOString())
+        .first();
+      if (!active) {
+        await external(() => bucket.delete(objectKey));
+        return;
+      }
     }
     if (!indexed) {
       const pending = await db
