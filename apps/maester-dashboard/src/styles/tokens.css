@@ -1,0 +1,50 @@
+/* Atura design tokens: gegenereerd uit tokens.json van het Atura designsystem. Niet met de hand wijzigen. */
+:root {
+  --teal-100: #4cb5ae;
+  --teal-75: #89c8c3;
+  --teal-50: #b6dbd8;
+  --teal-25: #ddedec;
+  --teal-tekst: #2a746e;
+  --navy-100: #22315f;
+  --navy-75: #52547c;
+  --navy-50: #8784a2;
+  --navy-25: #c1becf;
+  --zwart: #231f20;
+  --logo-zwart: #1d1d1b;
+  --nacht: #00172e;
+  --oceaan: #04548f;
+  --web-navy: #041c39;
+  --surface: #ffffff;
+  --surface-tint: #ddedec;
+  --surface-inverse: #22315f;
+  --ink: #000000;
+  --ink-muted: #52547c;
+  --ink-brand: #22315f;
+  --heading-1: #4cb5ae;
+  --heading-2: #8784a2;
+  --heading-3: #000000;
+  --accent: #4cb5ae;
+  --on-accent: #ffffff;
+  --rule: #4cb5ae;
+  --link: #2a746e;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 9999px;
+  --font-sans: var(--font-web, Aptos), "Segoe UI", system-ui, sans-serif;
+}
+[data-theme="dark"] {
+  --surface: #22315f;
+  --surface-tint: #00172e;
+  --surface-inverse: #00172e;
+  --ink: #ffffff;
+  --ink-muted: #c1becf;
+  --ink-brand: #ffffff;
+  --heading-1: #4cb5ae;
+  --heading-2: #b6dbd8;
+  --heading-3: #ffffff;
+  --accent: #4cb5ae;
+  --on-accent: #ffffff;
+  --rule: #4cb5ae;
+  --link: #4cb5ae;
+}
