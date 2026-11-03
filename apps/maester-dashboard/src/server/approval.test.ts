@@ -21,6 +21,7 @@ const user = {
 };
 const config = { PILOT_USER_ID: "pilot", PILOT_ORG_ID: "org" };
 let db: ReturnType<typeof drizzle<typeof schema>>;
+let client: ReturnType<typeof createClient>;
 const objects = new Map<string, Uint8Array>();
 const bucket = {
   put: vi.fn(async (key: string, bytes: Uint8Array) => {
@@ -46,7 +47,8 @@ beforeEach(async () => {
   objects.clear();
   bucket.put.mockClear();
   bucket.get.mockClear();
-  db = drizzle(createClient({ url: ":memory:" }), { schema });
+  client = createClient({ url: ":memory:" });
+  db = drizzle(client, { schema });
   testDb.current = db;
   await migrate(db, {
     migrationsFolder: fileURLToPath(new URL("../../drizzle", import.meta.url)),
@@ -140,6 +142,59 @@ describe("versioned report authorization and audit", () => {
     expect(objects.size).toBe(1);
     expect(objects.has(rows[0].objectKey)).toBe(true);
   });
+  it("pre-registers each PDF upload so an interrupted upload can be swept without a report version", async () => {
+    const put = bucket.put.getMockImplementation()!;
+    bucket.put.mockImplementationOnce(
+      async (key: string, bytes: Uint8Array) => {
+        const pending = await db.select().from(schema.pendingR2Objects);
+        expect(pending.map((row) => row.objectKey)).toEqual([key]);
+        await put(key, bytes);
+        throw new Error("interrupted upload");
+      },
+    );
+    await expect(
+      createConcept(user, config, bucket, "tenant", "run"),
+    ).rejects.toThrow("interrupted upload");
+    expect(await db.select().from(schema.reportVersions)).toHaveLength(0);
+    const pending = await db.select().from(schema.pendingR2Objects);
+    expect(pending).toHaveLength(1);
+    const { expireImports } = await import("./ingest");
+    const sweepDb = {
+      prepare(sql: string) {
+        let args: unknown[] = [];
+        const statement = {
+          bind(...values: unknown[]) {
+            args = values;
+            return statement;
+          },
+          async all() {
+            return {
+              results: (await client.execute({ sql, args: args as never[] }))
+                .rows,
+            };
+          },
+          async first() {
+            return (
+              (await client.execute({ sql, args: args as never[] })).rows[0] ??
+              null
+            );
+          },
+          async run() {
+            await client.execute({ sql, args: args as never[] });
+            return { success: true };
+          },
+        };
+        return statement;
+      },
+    } as unknown as D1Database;
+    await expireImports(
+      sweepDb,
+      bucket as unknown as R2Bucket,
+      new Date("2027-11-04T00:00:00Z"),
+    );
+    expect(await db.select().from(schema.pendingR2Objects)).toHaveLength(0);
+    expect(objects.size).toBe(0);
+  });
   it("cleans a partially uploaded PDF when R2 put reports a failure", async () => {
     const put = bucket.put.getMockImplementation()!;
     bucket.put.mockImplementationOnce(
@@ -179,6 +234,35 @@ describe("versioned report authorization and audit", () => {
       expect(objects.size).toBe(0);
     } finally {
       insert.mockRestore();
+    }
+  });
+  it("denies PDF status and downloads at the retention deadline before the sweep", async () => {
+    const concept = await createConcept(user, config, bucket, "tenant", "run");
+    await approveConcept(user, config, "tenant", "run", concept.digest);
+    bucket.get.mockClear();
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2027-11-03T00:00:00Z"));
+      await expect(reportStatus(user, config, "tenant", "run")).rejects.toThrow(
+        "Report expired",
+      );
+      await expect(
+        downloadReport(user, config, bucket, "tenant", "run", concept.digest),
+      ).rejects.toThrow("Report expired");
+      await expect(
+        downloadReport(
+          user,
+          config,
+          bucket,
+          "tenant",
+          "run",
+          concept.digest,
+          true,
+        ),
+      ).rejects.toThrow("Report expired");
+      expect(bucket.get).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
     }
   });
   it("lets the authorized employee download the draft to inspect before approval", async () => {

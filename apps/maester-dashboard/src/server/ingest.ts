@@ -1266,12 +1266,14 @@ export async function expireImports(
     .bind(now.toISOString())
     .all<{ object_key: string; tenant_id: string }>();
   for (const item of pending) {
-    if (
-      !tokenSafe(item.tenant_id) ||
-      !/^[-a-zA-Z0-9_]+\/[a-f0-9-]{36}$/.test(item.object_key) ||
-      !item.object_key.startsWith(`${item.tenant_id}/`)
-    )
-      fail();
+    const projectionKey =
+      /^[-a-zA-Z0-9_]+\/[a-f0-9-]{36}$/.test(item.object_key) &&
+      item.object_key.startsWith(`${item.tenant_id}/`);
+    const pdfKey =
+      /^reports\/[a-f0-9]{64}\/[a-f0-9]{64}-[a-f0-9-]{36}\.pdf$/.test(
+        item.object_key,
+      );
+    if (!tokenSafe(item.tenant_id) || (!projectionKey && !pdfKey)) fail();
     await bucket.delete(item.object_key);
     if (await bucket.get(item.object_key)) fail();
     await db

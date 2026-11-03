@@ -2,6 +2,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   controlResults,
+  pendingR2Objects,
   reportApprovalEvents,
   reportVersions,
   scanRuns,
@@ -63,6 +64,14 @@ async function source(
     .where(and(eq(scanRuns.tenantId, tenantId), eq(scanRuns.id, runId)))
     .limit(1);
   if (!rows.length) throw new Error("Report not found");
+  const deadline = new Date(rows[0].startedAt);
+  deadline.setUTCFullYear(deadline.getUTCFullYear() + 1);
+  if (
+    !Number.isFinite(deadline.getTime()) ||
+    rows[0].retentionLock ||
+    Date.now() >= deadline.getTime()
+  )
+    throw new Error("Report expired");
   const controls = await db
     .select()
     .from(controlResults)
@@ -161,6 +170,32 @@ export async function createConcept(
         )
         .limit(1)
     )[0];
+  const expiresAt = new Date(fields.startedAt);
+  expiresAt.setUTCFullYear(expiresAt.getUTCFullYear() + 1);
+  if (!Number.isFinite(expiresAt.getTime()))
+    throw new Error("Invalid retention deadline");
+  const cutoff = new Date();
+  cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 1);
+  // Register the unique key before writing R2. Even a terminated Worker leaves
+  // a durable record for the independent retention sweep.
+  await db.run(sql`
+    INSERT INTO pending_r2_objects(object_key, tenant_id, expires_at)
+    SELECT ${objectKey}, ${tenantId}, ${expiresAt.toISOString()}
+    FROM scan_runs
+    WHERE id = ${runId} AND tenant_id = ${tenantId}
+      AND retention_lock = 0 AND started_at > ${cutoff.toISOString()}
+  `);
+  const pending = await db
+    .select({ objectKey: pendingR2Objects.objectKey })
+    .from(pendingR2Objects)
+    .where(
+      and(
+        eq(pendingR2Objects.objectKey, objectKey),
+        eq(pendingR2Objects.tenantId, tenantId),
+      ),
+    )
+    .limit(1);
+  if (!pending.length) throw new Error("Retention in progress");
   try {
     await bucket.put(objectKey, bytes, {
       httpMetadata: { contentType: "application/pdf" },
@@ -172,8 +207,6 @@ export async function createConcept(
     if (committed?.objectKey !== objectKey) await bucket.delete(objectKey);
     throw error;
   }
-  const cutoff = new Date();
-  cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 1);
   try {
     // This SQL statement races atomically with retention's scan-run lock.
     // An old/locked run cannot acquire a PDF row even if rendering began earlier.
