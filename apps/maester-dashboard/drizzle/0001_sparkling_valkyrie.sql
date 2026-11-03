@@ -1,0 +1,1 @@
+CREATE INDEX `scan_runs_tenant_suite_started_idx` ON `scan_runs` (`tenant_id`,`suite`,`started_at`);

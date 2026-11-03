@@ -199,6 +199,88 @@ importers:
         specifier: ^3.2.6
         version: 3.2.7(@types/debug@4.1.12)(@types/node@22.19.0)(happy-dom@21.0.4)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
 
+  apps/maester-dashboard:
+    dependencies:
+      '@every-app/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+      '@tanstack/react-router':
+        specifier: 1.170.42
+        version: 1.170.42(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@tanstack/react-start':
+        specifier: 1.168.61
+        version: 1.168.61(crossws@0.4.4(srvx@0.11.22))(esbuild@0.28.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(rollup@3.30.0)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      drizzle-orm:
+        specifier: ^0.45.3
+        version: 0.45.3(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.15.15)(@prisma/client@5.22.0)(@types/pg@8.16.0)(better-sqlite3@12.5.0)(kysely@0.28.17)(pg@8.16.3)
+      jose:
+        specifier: ^6.2.5
+        version: 6.2.12
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.4(react@19.2.4)
+      tailwindcss:
+        specifier: ^4.1.16
+        version: 4.3.3
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@cloudflare/vite-plugin':
+        specifier: 2.0.0-beta.sha-91c870c02
+        version: 2.0.0-beta.sha-91c870c02(@types/node@22.20.5)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(workerd@1.20261019.1)
+      '@cloudflare/workers-types':
+        specifier: ^4.20251014.0
+        version: 4.20260702.1
+      '@libsql/client':
+        specifier: ^0.15.15
+        version: 0.15.15
+      '@tailwindcss/vite':
+        specifier: ^4.1.11
+        version: 4.3.3(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      '@types/node':
+        specifier: ^22.18.13
+        version: 22.20.5
+      '@types/react':
+        specifier: ^19.2.14
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.3(@types/react@19.2.14)
+      '@vitejs/plugin-react':
+        specifier: ^4.6.0
+        version: 4.7.0(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      cf:
+        specifier: 1.0.0-beta.14
+        version: 1.0.0-beta.14(@types/node@22.20.5)
+      drizzle-kit:
+        specifier: ^0.31.11
+        version: 0.31.11
+      everyapp:
+        specifier: workspace:*
+        version: link:../../packages/cli
+      knip:
+        specifier: ^5.66.4
+        version: 5.88.1(@types/node@22.20.5)(typescript@5.9.3)
+      prettier:
+        specifier: 3.6.2
+        version: 3.6.2
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^7.3.7
+        version: 7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
+      vite-tsconfig-paths:
+        specifier: ^5.1.4
+        version: 5.1.4(typescript@5.9.3)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/debug@4.1.12)(@types/node@22.20.5)(happy-dom@21.0.4)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
+
   landing-page:
     dependencies:
       '@tanstack/react-router':
@@ -9326,7 +9408,7 @@ snapshots:
       miniflare: 5.20261006.1-alpha(@types/node@22.19.0)
       unenv: 2.0.0-rc.24
       vite: 7.3.7(@types/node@22.19.0)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
-      ws: 8.21.0
+      ws: 8.22.0
     transitivePeerDependencies:
       - '@types/node'
       - bufferutil
@@ -9342,7 +9424,7 @@ snapshots:
       miniflare: 5.20261006.1-alpha(@types/node@22.20.5)
       unenv: 2.0.0-rc.24
       vite: 7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
-      ws: 8.21.0
+      ws: 8.22.0
     transitivePeerDependencies:
       - '@types/node'
       - bufferutil
@@ -11627,8 +11709,8 @@ snapshots:
     dependencies:
       '@tanstack/history': 1.162.5
       cookie-es: 3.1.1
-      seroval: 1.6.8
-      seroval-plugins: 1.6.8(seroval@1.6.8)
+      seroval: 1.7.2
+      seroval-plugins: 1.6.8(seroval@1.7.2)
 
   '@tanstack/router-devtools-core@1.168.2(@tanstack/router-core@1.171.35)(csstype@3.2.3)':
     dependencies:
@@ -11653,7 +11735,7 @@ snapshots:
 
   '@tanstack/router-generator@1.167.41':
     dependencies:
-      '@babel/types': 7.29.8
+      '@babel/types': 7.29.11
       '@tanstack/router-core': 1.171.35
       '@tanstack/router-utils': 1.162.3
       '@tanstack/virtual-file-routes': 1.162.0
@@ -11716,7 +11798,7 @@ snapshots:
     dependencies:
       '@babel/core': 7.29.7
       '@babel/template': 7.29.7
-      '@babel/types': 7.29.8
+      '@babel/types': 7.29.11
       '@tanstack/router-core': 1.171.35
       '@tanstack/router-generator': 1.167.41
       '@tanstack/router-utils': 1.162.3
@@ -11740,7 +11822,7 @@ snapshots:
     dependencies:
       '@babel/core': 7.29.7
       '@babel/template': 7.29.7
-      '@babel/types': 7.29.8
+      '@babel/types': 7.29.11
       '@tanstack/router-core': 1.171.35
       '@tanstack/router-generator': 1.167.41
       '@tanstack/router-utils': 1.162.3
@@ -11763,8 +11845,8 @@ snapshots:
   '@tanstack/router-utils@1.162.3':
     dependencies:
       '@babel/generator': 7.29.8
-      '@babel/parser': 7.29.9
-      '@babel/types': 7.29.8
+      '@babel/parser': 7.29.11
+      '@babel/types': 7.29.11
       ansis: 4.4.0
       babel-dead-code-elimination: 1.0.12
       diff: 8.0.4
@@ -11785,7 +11867,7 @@ snapshots:
       '@tanstack/router-core': 1.171.35
       '@tanstack/start-fn-stubs': 1.162.0
       '@tanstack/start-storage-context': 1.167.37
-      seroval: 1.6.8
+      seroval: 1.7.2
 
   '@tanstack/start-fn-stubs@1.162.0': {}
 
@@ -11871,7 +11953,7 @@ snapshots:
     dependencies:
       '@babel/code-frame': 7.29.7
       '@babel/core': 7.29.7
-      '@babel/types': 7.29.8
+      '@babel/types': 7.29.11
       '@jridgewell/remapping': 2.3.5
       '@tanstack/router-core': 1.171.35
       '@tanstack/router-generator': 1.167.41
@@ -11882,7 +11964,7 @@ snapshots:
       lightningcss: 1.33.0
       pathe: 2.0.3
       picomatch: 4.0.7
-      seroval: 1.6.8
+      seroval: 1.7.2
       source-map: 0.7.6
       srvx: 0.11.22
       tinyglobby: 0.2.17
@@ -11910,7 +11992,7 @@ snapshots:
     dependencies:
       '@babel/code-frame': 7.29.7
       '@babel/core': 7.29.7
-      '@babel/types': 7.29.8
+      '@babel/types': 7.29.11
       '@jridgewell/remapping': 2.3.5
       '@tanstack/router-core': 1.171.35
       '@tanstack/router-generator': 1.167.41
@@ -11921,7 +12003,7 @@ snapshots:
       lightningcss: 1.33.0
       pathe: 2.0.3
       picomatch: 4.0.7
-      seroval: 1.6.8
+      seroval: 1.7.2
       source-map: 0.7.6
       srvx: 0.11.22
       tinyglobby: 0.2.17
@@ -11965,7 +12047,7 @@ snapshots:
       '@tanstack/start-storage-context': 1.167.37
       fetchdts: 0.1.7
       h3-v2: h3@2.0.1-rc.20(crossws@0.4.4(srvx@0.11.22))
-      seroval: 1.6.8
+      seroval: 1.7.2
     transitivePeerDependencies:
       - crossws
 
@@ -12455,9 +12537,9 @@ snapshots:
   babel-dead-code-elimination@1.0.12:
     dependencies:
       '@babel/core': 7.29.7
-      '@babel/parser': 7.29.9
-      '@babel/traverse': 7.29.8
-      '@babel/types': 7.29.8
+      '@babel/parser': 7.29.11
+      '@babel/traverse': 7.29.10
+      '@babel/types': 7.29.11
     transitivePeerDependencies:
       - supports-color
 
@@ -14899,7 +14981,7 @@ snapshots:
       sharp: 0.35.5(@types/node@22.19.0)
       undici: 7.30.1
       workerd: 1.20261006.1
-      ws: 8.21.0
+      ws: 8.22.0
       youch: 4.1.0-beta.10
     transitivePeerDependencies:
       - '@types/node'
@@ -14912,7 +14994,7 @@ snapshots:
       sharp: 0.35.5(@types/node@22.19.1)
       undici: 7.30.1
       workerd: 1.20261006.1
-      ws: 8.21.0
+      ws: 8.22.0
       youch: 4.1.0-beta.10
     transitivePeerDependencies:
       - '@types/node'
@@ -14925,7 +15007,7 @@ snapshots:
       sharp: 0.35.5(@types/node@22.20.5)
       undici: 7.30.1
       workerd: 1.20261006.1
-      ws: 8.21.0
+      ws: 8.22.0
       youch: 4.1.0-beta.10
     transitivePeerDependencies:
       - '@types/node'
@@ -15774,10 +15856,13 @@ snapshots:
     dependencies:
       seroval: 1.6.8
 
+  seroval-plugins@1.6.8(seroval@1.7.2):
+    dependencies:
+      seroval: 1.7.2
+
   seroval@1.6.8: {}
 
-  seroval@1.7.2:
-    optional: true
+  seroval@1.7.2: {}
 
   serve-static@2.2.1:
     dependencies:
