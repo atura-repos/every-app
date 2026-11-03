@@ -485,6 +485,11 @@ export async function reconcile(
           ].includes(run.conclusion as string)
         )
           continue;
+        // Retention is measured from the source scan, not from import time.
+        // GitHub must not be able to resurrect a run after local expiry.
+        const runExpires = new Date(run.created_at as string);
+        runExpires.setUTCFullYear(runExpires.getUTCFullYear() + 1);
+        if (runExpires <= now) continue;
         // GitHub's artifact listing does not attest the producing attempt.
         if (run.run_attempt !== 1) {
           await db
@@ -559,19 +564,63 @@ export async function reconcile(
           const id = `${source.repo_id}:${run.id}:${run.run_attempt}:${artifact.id}`;
           const indexed = await db
             .prepare(
-              "SELECT digest,object_key FROM artifact_index WHERE id=? AND tenant_id=?",
+              "SELECT a.digest,a.object_key,s.retention_lock FROM artifact_index a JOIN scan_runs s ON s.id=a.run_id AND s.tenant_id=a.tenant_id WHERE a.id=? AND a.tenant_id=?",
             )
             .bind(id, source.tenant_id)
-            .first<{ digest: string; object_key: string }>();
+            .first<{
+              digest: string;
+              object_key: string;
+              retention_lock: number;
+            }>();
           if (indexed) {
+            if (indexed.retention_lock) continue;
             const read = await external(() => bucket.get(indexed.object_key));
             if (
               !read ||
               (await external(async () =>
                 digest(new Uint8Array(await read.arrayBuffer())),
               )) !== indexed.digest
-            )
-              externalReject();
+            ) {
+              // Repair only from the same provenance-bound, still-available
+              // artifact and only if the normalized projection digest agrees.
+              const recovered = await external(async () =>
+                extractProjection(
+                  await download(
+                    fetcher,
+                    `${base}/actions/artifacts/${artifact.id}/zip`,
+                    token,
+                  ),
+                ),
+              );
+              await external(async () =>
+                validateExport(safeParse(recovered), source.tenant_id),
+              );
+              if ((await digest(recovered)) !== indexed.digest)
+                externalReject();
+              await external(() => bucket.put(indexed.object_key, recovered));
+              const verified = await external(() =>
+                bucket.get(indexed.object_key),
+              );
+              if (
+                !verified ||
+                (await external(async () =>
+                  digest(new Uint8Array(await verified.arrayBuffer())),
+                )) !== indexed.digest
+              )
+                externalReject();
+              // If expiry won the race after our first lookup, do not leave
+              // a repaired object behind once its D1 index is gone/locked.
+              const current = await db
+                .prepare(
+                  "SELECT s.retention_lock FROM artifact_index a JOIN scan_runs s ON s.id=a.run_id WHERE a.id=? AND a.tenant_id=?",
+                )
+                .bind(id, source.tenant_id)
+                .first<{ retention_lock: number }>();
+              if (!current || current.retention_lock) {
+                await external(() => bucket.delete(indexed.object_key));
+                continue;
+              }
+            }
             await resolved(db, `${id}:readback`, source.tenant_id);
             await resolved(db, runEvent, source.tenant_id);
             continue;

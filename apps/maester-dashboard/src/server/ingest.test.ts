@@ -555,6 +555,18 @@ describe("validated private reconciliation", () => {
       (await client.execute("SELECT code FROM import_events")).rows,
     ).toEqual([{ code: "readback_unverified" }]);
   });
+  it("restores a missing indexed R2 object from the verified same-run artifact", async () => {
+    await reconcile(db, bucket, settings, fetcher, now);
+    const rows = (await client.execute("SELECT object_key FROM artifact_index"))
+      .rows;
+    const key = rows[0].object_key as string;
+    objects.delete(key);
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(objects.has(key)).toBe(true);
+    expect(
+      (await client.execute("SELECT * FROM import_events")).rows,
+    ).toHaveLength(0);
+  });
   it("clears an uncertain readback only after the indexed D1 and R2 digest verify", async () => {
     const actual = db;
     let once = true;
@@ -614,7 +626,11 @@ describe("validated private reconciliation", () => {
     db = {
       ...actual,
       prepare(sql: string) {
-        if (sql.includes("SELECT digest,object_key FROM artifact_index"))
+        if (
+          sql.includes(
+            "SELECT a.digest,a.object_key,s.retention_lock FROM artifact_index",
+          )
+        )
           throw new Error("D1 unavailable");
         return actual.prepare(sql);
       },
@@ -846,6 +862,16 @@ describe("validated private reconciliation", () => {
     expect(
       (await client.execute("SELECT * FROM retention_events")).rows,
     ).toHaveLength(1);
+  });
+  it("never reimports an expired run even if GitHub still returns its artifact", async () => {
+    await reconcile(db, bucket, settings, fetcher, now);
+    const future = new Date("2027-11-04T00:00:00Z");
+    await expireImports(db, bucket, future);
+    await reconcile(db, bucket, settings, fetcher, future);
+    expect((await client.execute("SELECT * FROM scan_runs")).rows).toHaveLength(
+      0,
+    );
+    expect(objects.size).toBe(0);
   });
   it("retries an interrupted R2 retention deletion without unlocking the run", async () => {
     await reconcile(db, bucket, settings, fetcher, now);
