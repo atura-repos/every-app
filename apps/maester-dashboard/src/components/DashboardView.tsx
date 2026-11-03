@@ -25,6 +25,7 @@ export function DashboardView({
   suite,
   runs,
   importEvents,
+  controlledRunIds,
   comparisons,
 }: Props) {
   const link = (tenant: string, type: "daily" | "cis") =>
@@ -149,6 +150,15 @@ export function DashboardView({
                     </div>
                   </div>
                   <ReportActions tenant={selectedTenant} run={run.id} />
+                  {controlledRunIds.includes(run.id) && (
+                    <p>
+                      <a
+                        href={`/api/controlled-original?tenant=${encodeURIComponent(selectedTenant)}&run=${encodeURIComponent(run.id)}`}
+                      >
+                        Gecontroleerd rapport als ZIP downloaden
+                      </a>
+                    </p>
+                  )}
                   <details>
                     <summary>Controles bekijken</summary>
                     <ul className="controls">
@@ -178,9 +188,11 @@ export function DashboardView({
                     {event.id} ·{" "}
                     {event.code === "projection_missing"
                       ? "Veilige projectie ontbreekt — controleer de GitHub-run en herstart de import na herstel."
-                      : event.code === "attempt_unverifiable"
-                        ? "Herpoging niet verifieerbaar — controleer de artifact-herkomst."
-                        : "Import mislukt — controleer de bron en probeer na herstel opnieuw."}
+                      : event.code === "controlled_missing"
+                        ? "Gecontroleerd rapport ontbreekt — de projectie blijft beschikbaar; controleer het afzonderlijke GitHub-artifact."
+                        : event.code === "attempt_unverifiable"
+                          ? "Herpoging niet verifieerbaar — controleer de artifact-herkomst."
+                          : "Import mislukt — controleer de bron en probeer na herstel opnieuw."}
                   </li>
                 ))}
               </ul>

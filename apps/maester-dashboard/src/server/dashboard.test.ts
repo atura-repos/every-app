@@ -2,6 +2,7 @@ import { createClient } from "@libsql/client";
 import { fileURLToPath } from "node:url";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { drizzle } from "drizzle-orm/libsql";
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as schema from "@/db/schema";
 
@@ -87,6 +88,52 @@ describe("pilot boundary", () => {
       authorizePilot({ ...mikkie, actor: { sub: "other" } }, config),
     ).toThrow();
     expect(() => authorizePilot(mikkie, config)).not.toThrow();
+  });
+  it("advertises only active controlled archives for the selected tenant", async () => {
+    await db
+      .insert(schema.scanRuns)
+      .values([
+        run("2026-11-03T00:00:00Z", "atura", "daily", ["MT.1001"]),
+        run("2026-11-02T00:00:00Z", "other", "daily", ["MT.1001"]),
+      ]);
+    await db.insert(schema.controlledOriginalIndex).values([
+      {
+        runId: "2026-11-03T00:00:00Z",
+        tenantId: "atura",
+        artifactId: 1,
+        objectKey: "atura/key",
+        digest: "a".repeat(64),
+        size: 10,
+        expiresAt: "2999-01-01T00:00:00Z",
+      },
+      {
+        runId: "2026-11-02T00:00:00Z",
+        tenantId: "other",
+        artifactId: 2,
+        objectKey: "other/key",
+        digest: "b".repeat(64),
+        size: 10,
+        expiresAt: "2999-01-01T00:00:00Z",
+      },
+    ]);
+    const model = await readDashboard(mikkie, config, "atura", "daily");
+    expect(model.controlledRunIds).toEqual(["2026-11-03T00:00:00Z"]);
+    await db
+      .update(schema.scanRuns)
+      .set({ retentionLock: 1 })
+      .where(eq(schema.scanRuns.tenantId, "atura"));
+    const locked = await readDashboard(mikkie, config, "atura", "daily");
+    expect(locked.controlledRunIds).toEqual([]);
+  });
+  it("distinguishes missing controlled archive from missing projection", async () => {
+    await db.insert(schema.importEvents).values({
+      id: "42:100:1:controlled",
+      tenantId: "atura",
+      code: "controlled_missing",
+      observedAt: "2026-11-03T00:00:00Z",
+    });
+    const model = await readDashboard(mikkie, config, "atura", "daily");
+    expect(model.importEvents[0].code).toBe("controlled_missing");
   });
   it("shows only authorized tenant import-state codes, not other tenants or arbitrary error text", async () => {
     await db.insert(schema.importEvents).values([

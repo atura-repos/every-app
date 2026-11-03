@@ -43,6 +43,15 @@ const doc = {
 };
 const zip = (value: unknown) =>
   zipSync({ "dashboard-result-v1.json": strToU8(JSON.stringify(value)) });
+const controlledHtml = () =>
+  strToU8(
+    '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Atura controlled assessment derivative</title><style>' +
+      "body{font:16px system-ui,sans-serif;color:#17233b;background:#f5f7fa;margin:0;padding:2rem}main{max-width:60rem;margin:auto;background:white;padding:2rem;border-top:6px solid #156f86}h1{color:#125469}table{border-collapse:collapse;width:100%}th,td{text-align:left;border-bottom:1px solid #d5dfe5;padding:.65rem}small{color:#48566b}" +
+      "</style></head><body><main><h1>Atura | Assessment</h1><p>Controlled derivative (controlled-original-v1); not the original Maester HTML report. Evidence, errors and free-text titles are intentionally omitted.</p>" +
+      "<p>Suite: Maester daily | Run 100 | Attempt 1</p><h2>Control outcomes</h2><table><thead><tr><th>Control ID</th><th>Result</th></tr></thead><tbody><tr><td>a</td><td>Passed</td></tr><tr><td>b</td><td>Skipped</td></tr></tbody></table><p><small>Atura Security | Statuses are recorded without supporting evidence.</small></p></main></body></html>",
+  );
+const controlledZip = (bytes = controlledHtml()) =>
+  zipSync({ "controlled-original-v1.html": bytes });
 // GitHub's upload-artifact ZIP uses flag bit 3 and a trailing data descriptor.
 function zipWithDescriptor(value: unknown) {
   const original = zip(value);
@@ -183,15 +192,217 @@ beforeEach(async () => {
             expired: false,
             workflow_run: { id: 100, head_repository_id: 42 },
           },
+          {
+            id: 902,
+            name: "maester-atura-controlled-original-v1-100-1",
+            size_in_bytes: 2000,
+            expired: false,
+            workflow_run: { id: 100, head_repository_id: 42 },
+          },
         ],
       });
     if (url.endsWith("/artifacts/900/zip"))
       return new Response(new Uint8Array(zip(doc)).buffer);
+    if (url.endsWith("/artifacts/902/zip"))
+      return new Response(new Uint8Array(controlledZip()).buffer);
     throw Error("Unexpected fetch");
   }) as typeof fetch;
 });
 
 describe("validated private reconciliation", () => {
+  it("matches the scanner's independently rendered controlled HTML bytes", async () => {
+    const hash = new Uint8Array(
+      await crypto.subtle.digest(
+        "SHA-256",
+        new Uint8Array(controlledHtml()).buffer,
+      ),
+    );
+    expect(
+      Array.from(hash, (b) => b.toString(16).padStart(2, "0")).join(""),
+    ).toBe("28c6dfb8db10b40153d99eacb205a586f2cd056351fe8177a5333652541ce1b9");
+  });
+  it("stores canonical controlled HTML separately and expires its private bytes", async () => {
+    await reconcile(db, bucket, settings, fetcher, now);
+    const rows = (
+      await client.execute("SELECT * FROM controlled_original_index")
+    ).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      tenant_id: "atura",
+      run_id: "42:100:1:900",
+      artifact_id: 902,
+      size: controlledHtml().length,
+      expires_at: "2027-11-02T00:00:00.000Z",
+    });
+    expect(objects.get(rows[0].object_key as string)).toEqual(controlledHtml());
+    expect(rows[0].object_key).not.toBe(
+      (await client.execute("SELECT object_key FROM artifact_index")).rows[0]
+        .object_key,
+    );
+    await expireImports(db, bucket, new Date("2027-11-04T00:00:00Z"));
+    expect(
+      (await client.execute("SELECT * FROM controlled_original_index")).rows,
+    ).toHaveLength(0);
+    expect(objects.size).toBe(0);
+  });
+  it("records absent controlled artifact safely without blocking projection", async () => {
+    const original = fetcher;
+    fetcher = (async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/runs/100/artifacts?per_page=100")) {
+        const payload = (await (await original(url, init)).json()) as {
+          artifacts: Record<string, unknown>[];
+        };
+        return Response.json({
+          artifacts: payload.artifacts.filter((a) => a.id !== 902),
+        });
+      }
+      return original(url, init);
+    }) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT * FROM artifact_index")).rows,
+    ).toHaveLength(1);
+    expect(
+      (await client.execute("SELECT code FROM import_events")).rows,
+    ).toEqual([{ code: "controlled_missing" }]);
+  });
+  it("retries rejected HTML later without blocking indexed projection", async () => {
+    const original = fetcher;
+    let archive = controlledZip(strToU8("<script>bad()</script>"));
+    fetcher = (async (url: string, init?: RequestInit) =>
+      url.endsWith("/artifacts/902/zip")
+        ? new Response(new Uint8Array(archive).buffer)
+        : original(url, init)) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT * FROM artifact_index")).rows,
+    ).toHaveLength(1);
+    expect(
+      (await client.execute("SELECT * FROM controlled_original_index")).rows,
+    ).toHaveLength(0);
+    archive = controlledZip();
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT * FROM controlled_original_index")).rows,
+    ).toHaveLength(1);
+  });
+  it("rejects cross-run controlled artifact binding and legacy ZIP member", async () => {
+    const original = fetcher;
+    let crossRun = true;
+    fetcher = (async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/artifacts/902/zip") && !crossRun)
+        return new Response(
+          new Uint8Array(zipSync({ "legacy.html": controlledHtml() })).buffer,
+        );
+      if (url.endsWith("/runs/100/artifacts?per_page=100") && crossRun) {
+        const payload = (await (await original(url, init)).json()) as {
+          artifacts: Record<string, unknown>[];
+        };
+        return Response.json({
+          artifacts: payload.artifacts.map((a) =>
+            a.id === 902
+              ? { ...a, workflow_run: { id: 101, head_repository_id: 42 } }
+              : a,
+          ),
+        });
+      }
+      return original(url, init);
+    }) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT * FROM controlled_original_index")).rows,
+    ).toHaveLength(0);
+    crossRun = false;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT * FROM controlled_original_index")).rows,
+    ).toHaveLength(0);
+  });
+  it("rejects a forged controlled ZIP descriptor and preserves the projection", async () => {
+    const original = fetcher;
+    const archive = controlledZip();
+    const view = new DataView(archive.buffer);
+    const central = view.getUint32(archive.length - 6, true);
+    view.setUint32(central + 24, 65537, true);
+    fetcher = (async (url: string, init?: RequestInit) =>
+      url.endsWith("/artifacts/902/zip")
+        ? new Response(new Uint8Array(archive).buffer)
+        : original(url, init)) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT * FROM artifact_index")).rows,
+    ).toHaveLength(1);
+    expect(
+      (await client.execute("SELECT * FROM controlled_original_index")).rows,
+    ).toHaveLength(0);
+  });
+  it("retains a pending ledger for uncertain D1 controlled readback and expires orphan bytes", async () => {
+    const actual = db;
+    db = {
+      ...actual,
+      prepare(sql: string) {
+        const stmt = actual.prepare(sql);
+        if (
+          !sql.startsWith(
+            "SELECT artifact_id,object_key,digest,size FROM controlled_original_index",
+          )
+        )
+          return stmt;
+        return {
+          ...stmt,
+          bind(...args: unknown[]) {
+            return { ...stmt.bind(...args), first: async () => null };
+          },
+        } as D1PreparedStatement;
+      },
+    } as D1Database;
+    await expect(reconcile(db, bucket, settings, fetcher, now)).rejects.toThrow(
+      "Private import rejected",
+    );
+    db = actual;
+    expect(
+      (await client.execute("SELECT * FROM pending_r2_objects")).rows,
+    ).toHaveLength(2);
+    await expireImports(db, bucket, new Date("2027-11-04T00:00:00Z"));
+    expect(objects.size).toBe(0);
+  });
+  it("cleans partial controlled R2 writes and retries next schedule", async () => {
+    const put = bucket.put.bind(bucket);
+    let failOnce = true;
+    bucket.put = (async (key: string, bytes: Uint8Array) => {
+      if (key !== undefined && failOnce && objects.size === 1) {
+        failOnce = false;
+        objects.set(key, new Uint8Array(bytes));
+        throw Error("R2 unavailable");
+      }
+      return put(key, bytes);
+    }) as R2Bucket["put"];
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT * FROM controlled_original_index")).rows,
+    ).toHaveLength(0);
+    expect(objects.size).toBe(1); // projection only
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT * FROM controlled_original_index")).rows,
+    ).toHaveLength(1);
+  });
+  it("does not orphan a controlled upload when expiry wins after the ledger write", async () => {
+    const put = bucket.put.bind(bucket);
+    let expired = false;
+    bucket.put = (async (key: string, bytes: Uint8Array) => {
+      if (!expired && objects.size === 1) {
+        expired = true;
+        await expireImports(db, bucket, new Date("2027-11-04T00:00:00Z"));
+      }
+      return put(key, bytes);
+    }) as R2Bucket["put"];
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect(
+      (await client.execute("SELECT * FROM controlled_original_index")).rows,
+    ).toHaveLength(0);
+    expect(objects.size).toBe(0);
+  });
   it("isolates a broken ZIP, retries it next schedule, and clears the resolved event", async () => {
     const original = fetcher;
     let broken = true;
@@ -241,8 +452,8 @@ describe("validated private reconciliation", () => {
       (await client.execute("SELECT id FROM scan_runs")).rows,
     ).toHaveLength(2);
     expect(
-      (await client.execute("SELECT * FROM import_events")).rows,
-    ).toHaveLength(0);
+      (await client.execute("SELECT code FROM import_events")).rows,
+    ).toEqual([{ code: "import_failed" }]);
   });
   it("isolates a failed source listing and retries it without blocking another source", async () => {
     await client.execute(
@@ -578,7 +789,7 @@ describe("validated private reconciliation", () => {
     expect(objects.size).toBe(1);
     db = actual;
     await reconcile(db, bucket, settings, fetcher, now);
-    expect(objects.size).toBe(2);
+    expect(objects.size).toBe(3);
     await expireImports(db, bucket, new Date("2027-11-04T00:00:00Z"));
     expect(objects.size).toBe(0);
   });

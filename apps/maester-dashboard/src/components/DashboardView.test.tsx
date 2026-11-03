@@ -39,6 +39,7 @@ const model = {
       observedAt: "2026-11-03T00:00:00Z",
     },
   ],
+  controlledRunIds: [] as string[],
   comparisons: [
     {
       currentId: "run-1",
@@ -75,6 +76,18 @@ describe("dashboard presentation", () => {
     expect(html).toContain("PDF-concept");
     expect(html).toContain("Goedkeuren");
     expect(html).not.toContain("Klantmail verzenden");
+  });
+  it("offers only an authorized ZIP archive link for runs with a controlled artifact", () => {
+    const hidden = renderToStaticMarkup(<DashboardView {...model} />);
+    expect(hidden).not.toContain("/api/controlled-original?");
+    const available = renderToStaticMarkup(
+      <DashboardView {...model} controlledRunIds={["run-1"]} />,
+    );
+    expect(available).toContain(
+      "/api/controlled-original?tenant=atura&amp;run=run-1",
+    );
+    expect(available).toContain("Gecontroleerd rapport als ZIP downloaden");
+    expect(available).not.toContain('.html"');
   });
   it("shows actionable tenant-scoped import state without raw artifact contents", () => {
     const html = renderToStaticMarkup(<DashboardView {...model} />);

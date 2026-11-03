@@ -154,7 +154,11 @@ async function bounded(response: Response, limit: number): Promise<Uint8Array> {
   return all;
 }
 
-export function extractProjection(zip: Uint8Array): Uint8Array {
+function extractNamedFile(
+  zip: Uint8Array,
+  filename: string,
+  maxOutput: number,
+): Uint8Array {
   // Reject forged ZIP metadata, extra files and advertised bombs BEFORE inflate.
   const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
   if (
@@ -180,11 +184,11 @@ export function extractProjection(zip: Uint8Array): Uint8Array {
   if (
     centralSize !== 46 + nameLen + extraLen + commentLen ||
     (flags & ~8) !== 0 || // only the optional data-descriptor bit is accepted
-    view.getUint32(centralOffset + 24, true) > MAX_JSON ||
+    view.getUint32(centralOffset + 24, true) > maxOutput ||
     view.getUint32(centralOffset + 20, true) > MAX_ZIP ||
     new TextDecoder().decode(
       zip.subarray(centralOffset + 46, centralOffset + 46 + nameLen),
-    ) !== "dashboard-result-v1.json"
+    ) !== filename
   )
     fail();
   const local = view.getUint32(centralOffset + 42, true);
@@ -239,7 +243,7 @@ export function extractProjection(zip: Uint8Array): Uint8Array {
   let error = false;
   const unzip = new Unzip((file) => {
     count++;
-    if (count !== 1 || file.name !== "dashboard-result-v1.json") {
+    if (count !== 1 || file.name !== filename) {
       error = true;
       return;
     }
@@ -251,7 +255,7 @@ export function extractProjection(zip: Uint8Array): Uint8Array {
         return;
       }
       size += data.length;
-      if (size > MAX_JSON) {
+      if (size > maxOutput) {
         error = true;
         return;
       }
@@ -271,6 +275,9 @@ export function extractProjection(zip: Uint8Array): Uint8Array {
   unzip.push(zip, true);
   if (error || count !== 1 || !output) fail();
   return output;
+}
+export function extractProjection(zip: Uint8Array): Uint8Array {
+  return extractNamedFile(zip, "dashboard-result-v1.json", MAX_JSON);
 }
 
 type Source = {
@@ -387,6 +394,281 @@ const digest = async (bytes: Uint8Array) =>
   )
     .map((x) => x.toString(16).padStart(2, "0"))
     .join("");
+
+// Exact counterpart of scripts/export_controlled_original.py at scanner commit 49b24fc.
+// Do not substitute workflow metadata or source titles into this document.
+const CONTROLLED_WORKFLOWS: Record<string, [string, string]> = {
+  "maester-atura-dashboard": ["maester.yml", "Maester daily"],
+  "maester-atura-cis-graph-dashboard": ["cis-assessment.yml", "CIS M365 Graph"],
+  "maester-atura-cis-exo-dashboard": [
+    "cis-exo-assessment.yml",
+    "CIS M365 Graph + EXO",
+  ],
+  "maester-atura-cis-teams-dashboard": [
+    "cis-teams-assessment.yml",
+    "CIS M365 Graph + EXO + Teams",
+  ],
+};
+const CONTROLLED_CSS =
+  "body{font:16px system-ui,sans-serif;color:#17233b;background:#f5f7fa;margin:0;padding:2rem}main{max-width:60rem;margin:auto;background:white;padding:2rem;border-top:6px solid #156f86}h1{color:#125469}table{border-collapse:collapse;width:100%}th,td{text-align:left;border-bottom:1px solid #d5dfe5;padding:.65rem}small{color:#48566b}";
+function canonicalControlled(
+  projection: Export,
+  source: Source,
+  runId: number,
+  attempt: number,
+): Uint8Array {
+  const workflow = CONTROLLED_WORKFLOWS[source.artifact_name];
+  if (
+    !workflow ||
+    source.workflow_path !== `.github/workflows/${workflow[0]}` ||
+    !/^[1-9][0-9]{0,19}$/.test(String(runId)) ||
+    !/^[1-9][0-9]{0,19}$/.test(String(attempt)) ||
+    projection.scan_status !== "completed" ||
+    projection.controls.length !== projection.expected_test_ids.length ||
+    projection.controls.some((c, i) => c.id !== projection.expected_test_ids[i])
+  )
+    fail();
+  const rows = projection.controls
+    .map((c) => `<tr><td>${c.id}</td><td>${c.result}</td></tr>`)
+    .join("");
+  return new TextEncoder().encode(
+    '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Atura controlled assessment derivative</title><style>' +
+      CONTROLLED_CSS +
+      "</style></head><body><main><h1>Atura | Assessment</h1>" +
+      "<p>Controlled derivative (controlled-original-v1); not the original Maester HTML report. Evidence, errors and free-text titles are intentionally omitted.</p>" +
+      `<p>Suite: ${workflow[1]} | Run ${runId} | Attempt ${attempt}</p>` +
+      "<h2>Control outcomes</h2><table><thead><tr><th>Control ID</th><th>Result</th></tr></thead><tbody>" +
+      rows +
+      "</tbody></table><p><small>Atura Security | Statuses are recorded without supporting evidence.</small></p></main></body></html>",
+  );
+}
+
+async function importControlled(
+  db: D1Database,
+  bucket: R2Bucket,
+  fetcher: typeof fetch,
+  base: string,
+  token: string,
+  source: Source,
+  run: Record<string, unknown>,
+  artifacts: unknown[],
+  runId: string,
+  expires: string,
+  now: Date,
+) {
+  const statusId = `${runId}:controlled`;
+  try {
+    const sourceName = source.artifact_name.replace(/-dashboard$/, "");
+    const matches = artifacts.filter(
+      (a) =>
+        record(a) &&
+        a.name ===
+          `${sourceName}-controlled-original-v1-${run.id}-${run.run_attempt}` &&
+        a.expired === false,
+    );
+    if (!matches.length) {
+      await db
+        .prepare(
+          "INSERT INTO import_events(id,tenant_id,code,observed_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET code=excluded.code,observed_at=excluded.observed_at WHERE tenant_id=excluded.tenant_id",
+        )
+        .bind(
+          statusId,
+          source.tenant_id,
+          "controlled_missing",
+          now.toISOString(),
+        )
+        .run();
+      return;
+    }
+    if (matches.length !== 1) externalReject();
+    const artifact = matches[0] as Record<string, unknown>;
+    if (
+      !int(artifact.id) ||
+      !int(artifact.size_in_bytes) ||
+      artifact.size_in_bytes > MAX_ZIP ||
+      !record(artifact.workflow_run) ||
+      artifact.workflow_run.id !== run.id ||
+      artifact.workflow_run.head_repository_id !== source.repo_id
+    )
+      externalReject();
+    const indexed = await db
+      .prepare(
+        "SELECT c.artifact_id,c.object_key,c.digest,c.size,s.retention_lock FROM controlled_original_index c JOIN scan_runs s ON s.id=c.run_id AND s.tenant_id=c.tenant_id WHERE c.run_id=? AND c.tenant_id=?",
+      )
+      .bind(runId, source.tenant_id)
+      .first<{
+        artifact_id: number;
+        object_key: string;
+        digest: string;
+        size: number;
+        retention_lock: number;
+      }>();
+    if (indexed?.retention_lock) return;
+    if (indexed && indexed.artifact_id !== artifact.id) externalReject();
+    const projectionIndex = await db
+      .prepare(
+        "SELECT a.object_key,a.digest,s.retention_lock FROM artifact_index a JOIN scan_runs s ON s.id=a.run_id AND s.tenant_id=a.tenant_id WHERE a.id=? AND a.tenant_id=?",
+      )
+      .bind(runId, source.tenant_id)
+      .first<{ object_key: string; digest: string; retention_lock: number }>();
+    if (!projectionIndex || projectionIndex.retention_lock) return;
+    const projectionBody = await external(() =>
+      bucket.get(projectionIndex.object_key),
+    );
+    if (!projectionBody) externalReject();
+    const projectionBytes = await external(
+      async () => new Uint8Array(await projectionBody.arrayBuffer()),
+    );
+    if ((await digest(projectionBytes)) !== projectionIndex.digest)
+      externalReject();
+    const projection = await external(async () =>
+      validateExport(safeParse(projectionBytes), source.tenant_id),
+    );
+    const canonical = await external(async () =>
+      canonicalControlled(
+        projection,
+        source,
+        run.id as number,
+        run.run_attempt as number,
+      ),
+    );
+    if (canonical.length > MAX_JSON) externalReject();
+    const canonicalHash = await digest(canonical);
+    if (
+      indexed &&
+      (indexed.digest !== canonicalHash || indexed.size !== canonical.length)
+    )
+      externalReject();
+    if (indexed) {
+      const existing = await external(() => bucket.get(indexed.object_key));
+      if (
+        existing &&
+        (await digest(
+          new Uint8Array(await external(() => existing.arrayBuffer())),
+        )) === canonicalHash
+      ) {
+        await resolved(db, statusId, source.tenant_id);
+        return;
+      }
+    }
+    const bytes = await external(async () =>
+      extractNamedFile(
+        await download(
+          fetcher,
+          `${base}/actions/artifacts/${artifact.id}/zip`,
+          token,
+        ),
+        "controlled-original-v1.html",
+        MAX_JSON,
+      ),
+    );
+    if (
+      bytes.length !== canonical.length ||
+      bytes.some((b, i) => b !== canonical[i])
+    )
+      externalReject();
+    const objectKey =
+      indexed?.object_key ?? `${source.tenant_id}/${crypto.randomUUID()}`;
+    if (!indexed) {
+      const ledger = await db
+        .prepare(
+          "INSERT INTO pending_r2_objects(object_key,tenant_id,expires_at) SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM scan_runs WHERE id=? AND tenant_id=? AND retention_lock=0 AND started_at<?)",
+        )
+        .bind(
+          objectKey,
+          source.tenant_id,
+          expires,
+          runId,
+          source.tenant_id,
+          now.toISOString(),
+        )
+        .run();
+      if (!ledger.success) fail();
+      const pending = await db
+        .prepare(
+          "SELECT object_key FROM pending_r2_objects WHERE object_key=? AND tenant_id=?",
+        )
+        .bind(objectKey, source.tenant_id)
+        .first();
+      if (!pending) return;
+    }
+    try {
+      await external(() => bucket.put(objectKey, bytes));
+      const read = await external(() => bucket.get(objectKey));
+      if (
+        !read ||
+        (await digest(
+          new Uint8Array(await external(() => read.arrayBuffer())),
+        )) !== canonicalHash
+      )
+        externalReject();
+    } catch (error) {
+      if (!indexed) await external(() => bucket.delete(objectKey));
+      throw error;
+    }
+    if (!indexed) {
+      const pending = await db
+        .prepare(
+          "SELECT object_key FROM pending_r2_objects WHERE object_key=? AND tenant_id=?",
+        )
+        .bind(objectKey, source.tenant_id)
+        .first();
+      const active = await db
+        .prepare(
+          "SELECT id FROM scan_runs WHERE id=? AND tenant_id=? AND retention_lock=0",
+        )
+        .bind(runId, source.tenant_id)
+        .first();
+      if (!pending || !active) {
+        await external(() => bucket.delete(objectKey));
+        return;
+      }
+      // Conditional insertion shares the same D1 serialization boundary as expiry's run lock.
+      // Pending ledger remains until the retention sweep even on an uncertain response.
+      await db
+        .prepare(
+          "INSERT INTO controlled_original_index(run_id,tenant_id,artifact_id,object_key,digest,size,expires_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM scan_runs WHERE id=? AND tenant_id=? AND retention_lock=0) AND EXISTS (SELECT 1 FROM pending_r2_objects WHERE object_key=? AND tenant_id=?)",
+        )
+        .bind(
+          runId,
+          source.tenant_id,
+          artifact.id,
+          objectKey,
+          canonicalHash,
+          bytes.length,
+          expires,
+          runId,
+          source.tenant_id,
+          objectKey,
+          source.tenant_id,
+        )
+        .run();
+    }
+    const verified = await db
+      .prepare(
+        "SELECT artifact_id,object_key,digest,size FROM controlled_original_index WHERE run_id=? AND tenant_id=?",
+      )
+      .bind(runId, source.tenant_id)
+      .first<{
+        artifact_id: number;
+        object_key: string;
+        digest: string;
+        size: number;
+      }>();
+    if (
+      !verified ||
+      verified.artifact_id !== artifact.id ||
+      verified.object_key !== objectKey ||
+      verified.digest !== canonicalHash ||
+      verified.size !== bytes.length
+    )
+      fail();
+    await resolved(db, statusId, source.tenant_id);
+  } catch (error) {
+    if (!(error instanceof ImportFailure)) throw error;
+    await event(db, statusId, source.tenant_id, now);
+  }
+}
 
 export async function reconcile(
   db: D1Database,
@@ -631,6 +913,19 @@ export async function reconcile(
             }
             await resolved(db, `${id}:readback`, source.tenant_id);
             await resolved(db, runEvent, source.tenant_id);
+            await importControlled(
+              db,
+              bucket,
+              fetcher,
+              base,
+              token,
+              source,
+              run,
+              artifacts.artifacts,
+              id,
+              runExpires.toISOString(),
+              now,
+            );
             continue;
           }
           const bytes = await external(async () =>
@@ -746,6 +1041,19 @@ export async function reconcile(
             }
             fail();
           }
+          await importControlled(
+            db,
+            bucket,
+            fetcher,
+            base,
+            token,
+            source,
+            run,
+            artifacts.artifacts,
+            id,
+            expires.toISOString(),
+            now,
+          );
         } catch (error) {
           if (!(error instanceof ImportFailure)) throw error;
           await event(db, runEvent, source.tenant_id, now);
@@ -798,6 +1106,17 @@ export async function expireImports(
       await bucket.delete(report.object_key);
       if (await bucket.get(report.object_key)) fail();
     }
+    const controlled = await db
+      .prepare(
+        "SELECT object_key FROM controlled_original_index WHERE run_id=? AND tenant_id=?",
+      )
+      .bind(item.run_id, item.tenant_id)
+      .first<{ object_key: string }>();
+    if (controlled) {
+      if (!controlled.object_key.startsWith(`${item.tenant_id}/`)) fail();
+      await bucket.delete(controlled.object_key);
+      if (await bucket.get(controlled.object_key)) fail();
+    }
     await bucket.delete(item.object_key);
     if (await bucket.get(item.object_key)) fail();
     await db.batch([
@@ -811,6 +1130,11 @@ export async function expireImports(
         .bind(item.run_id, item.tenant_id),
       db
         .prepare("DELETE FROM control_results WHERE run_id=? AND tenant_id=?")
+        .bind(item.run_id, item.tenant_id),
+      db
+        .prepare(
+          "DELETE FROM controlled_original_index WHERE run_id=? AND tenant_id=?",
+        )
         .bind(item.run_id, item.tenant_id),
       db
         .prepare("DELETE FROM artifact_index WHERE id=? AND tenant_id=?")

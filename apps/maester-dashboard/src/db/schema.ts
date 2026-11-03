@@ -53,6 +53,22 @@ export const pendingR2Objects = sqliteTable("pending_r2_objects", {
     .references(() => tenantRegistry.id),
   expiresAt: text("expires_at").notNull(),
 });
+export const controlledOriginalIndex = sqliteTable(
+  "controlled_original_index",
+  {
+    runId: text("run_id")
+      .primaryKey()
+      .references(() => scanRuns.id),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenantRegistry.id),
+    artifactId: integer("artifact_id").notNull(),
+    objectKey: text("object_key").notNull(),
+    digest: text("digest").notNull(),
+    size: integer("size").notNull(),
+    expiresAt: text("expires_at").notNull(),
+  },
+);
 export const importEvents = sqliteTable("import_events", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id")

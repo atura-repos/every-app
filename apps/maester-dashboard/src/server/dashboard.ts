@@ -1,7 +1,8 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import { db } from "@/db";
 import {
   controlResults,
+  controlledOriginalIndex,
   importEvents,
   scanRuns,
   tenantAccess,
@@ -210,12 +211,34 @@ export async function readDashboard(
     .where(eq(importEvents.tenantId, tenantId))
     .orderBy(desc(importEvents.observedAt))
     .limit(20);
+  const activeArchives = await db
+    .select({ runId: controlledOriginalIndex.runId })
+    .from(controlledOriginalIndex)
+    .innerJoin(
+      scanRuns,
+      and(
+        eq(scanRuns.id, controlledOriginalIndex.runId),
+        eq(scanRuns.tenantId, controlledOriginalIndex.tenantId),
+      ),
+    )
+    .where(
+      and(
+        eq(controlledOriginalIndex.tenantId, tenantId),
+        eq(scanRuns.retentionLock, 0),
+        gt(controlledOriginalIndex.expiresAt, new Date().toISOString()),
+      ),
+    );
+  const activeRunIds = new Set(activeArchives.map((row) => row.runId));
   return {
     runs,
+    controlledRunIds: runs
+      .filter((run) => activeRunIds.has(run.id))
+      .map((run) => run.id),
     importEvents: importEventsForTenant.map((event) => ({
       ...event,
       code: [
         "projection_missing",
+        "controlled_missing",
         "attempt_unverifiable",
         "import_failed",
       ].includes(event.code)
