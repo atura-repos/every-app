@@ -12,7 +12,7 @@ import {
 } from "./view";
 
 const FULL_HEADER =
-  "Tools for Acme on EveryApp. Each tool is named `<app>_<tool>`; call everyapp_list_apps to see what each app is for. everyapp_search_tools finds a tool by words.";
+  "Tools for Acme on Atura Apps Portal. Each tool is named `<app>_<tool>`; call everyapp_list_apps to see what each app is for. everyapp_search_tools finds a tool by words.";
 
 /** `count` read tools, `schemaBytes` of description inside each schema. */
 function manyTools(count: number, schemaBytes = 0): ToolBusTool[] {
@@ -42,7 +42,7 @@ describe("gatewaySurfaceView", () => {
     expect(view).toMatchObject({
       surface: "gateway",
       listing: "full",
-      serverInfo: { name: "every-app", title: "Acme · EveryApp" },
+      serverInfo: { name: "every-app", title: "Acme · Atura Apps Portal" },
       requestId: "ray_1",
     });
     expect(view.allowedOrigins).toBeUndefined();
@@ -76,7 +76,9 @@ describe("gatewaySurfaceView", () => {
   });
 
   it("says so when no app is available yet", () => {
-    expect(gatewaySurfaceView(PRINCIPAL, []).instructions).toContain(
+    const view = gatewaySurfaceView(PRINCIPAL, []);
+    expect(view.serverInfo.title).toBe("Atura Apps Portal");
+    expect(view.instructions).toContain(
       "No apps are available to this connection yet.",
     );
   });
@@ -375,7 +377,7 @@ describe("gatewaySurfaceView", () => {
       // Two visible tools per app (the destructive one is hidden).
       expect(view.instructions).toBe(
         [
-          "Tools for Acme on EveryApp. This connection lists its 4 tools compactly: call everyapp_search_tools (words, an app id, or both) to find tools and their input schemas, then everyapp_call_read or everyapp_call_write with a tool's name and arguments. Call everyapp_list_apps to see what each app is for.",
+          "Tools for Acme on Atura Apps Portal. This connection lists its 4 tools compactly: call everyapp_search_tools (words, an app id, or both) to find tools and their input schemas, then everyapp_call_read or everyapp_call_write with a tool's name and arguments. Call everyapp_list_apps to see what each app is for.",
           "Apps: chef (Chef), todo (Todos).",
           "crm (CRM) is not available: needs setup.",
           "",

@@ -824,7 +824,7 @@ describe("discovery", () => {
       authorization_servers: [GATEWAY],
       scopes_supported: ["mcp:read", "mcp:write"],
       bearer_methods_supported: ["header"],
-      resource_name: "EveryApp",
+      resource_name: "Atura Apps Portal",
     });
     // The origin's own metadata describes no resource here.
     expect((await send("/.well-known/oauth-protected-resource")).status).toBe(
@@ -1014,7 +1014,7 @@ describe("a DCR client (Codex-style)", () => {
     );
     expect(((await init.json()) as { result: unknown }).result).toMatchObject({
       protocolVersion: "2025-06-18",
-      serverInfo: { name: "every-app", title: "acme · EveryApp" },
+      serverInfo: { name: "every-app", title: "acme · Atura Apps Portal" },
       instructions: expect.stringContaining(
         "Apps: notes (Notes), todo (Todos).",
       ),

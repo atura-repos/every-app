@@ -368,7 +368,7 @@ export function InstallAppForm({
                   }
                 />
                 {job.error?.code === "WORKER_CHANGED"
-                  ? "Replace the deployment changed outside EveryApp."
+                  ? "Replace the deployment changed outside Atura Apps Portal."
                   : job.error?.code === "WORKFLOW_REMOVED"
                     ? "Delete the removed Workflows and their instances permanently."
                     : job.error?.code === "EMAIL_ROUTING_DISABLED"
@@ -503,8 +503,8 @@ function Refusal({ error }: { error: Error }) {
         <CircleAlert />
         <AlertDescription className="flex min-w-0 flex-col gap-2">
           <span>
-            This repository publishes no EveryApp release. Clone it and deploy
-            from its checkout with the EveryApp CLI:
+            This repository publishes no compatible app release. Clone it and
+            deploy from its checkout with the command-line tool:
           </span>
           <CodeBlock code="pnpm everyapp deploy" />
         </AlertDescription>

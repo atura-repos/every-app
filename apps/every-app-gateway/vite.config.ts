@@ -80,9 +80,9 @@ export default defineConfig(({ isPreview }) => ({
         enabled: false,
       },
       manifest: {
-        name: "EveryApp",
-        short_name: "EveryApp",
-        description: "Embedded apps platform",
+        name: "Atura Apps Portal",
+        short_name: "Atura Apps Portal",
+        description: "Atura Apps Portal",
         theme_color: "#ffffff",
         background_color: "#ffffff",
         display: "standalone",

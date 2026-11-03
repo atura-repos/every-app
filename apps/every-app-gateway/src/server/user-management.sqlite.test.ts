@@ -654,7 +654,7 @@ describe("user management (SQLite)", () => {
       expect(mailbox.sent).toEqual([
         expect.objectContaining({
           to: `${member}@example.com`,
-          subject: "Reset your EveryApp password",
+          subject: "Reset your Atura Apps Portal password",
         }),
       ]);
       expect(mailbox.sent[0]?.text).toMatch(

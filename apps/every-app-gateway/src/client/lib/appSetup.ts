@@ -15,7 +15,7 @@ import {
 /** How an operator re-reads the app Worker's secrets after setting one another way. */
 export const STATUS_COMMAND = "pnpm everyapp status";
 
-export const PLATFORM_NOTE = "EveryApp is still setting this up.";
+export const PLATFORM_NOTE = "Atura Apps Portal is still setting this up.";
 
 /** Who sets the app up, which decides how the dialog reads. */
 export enum SetupAction {

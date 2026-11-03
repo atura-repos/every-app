@@ -1504,7 +1504,7 @@ describe("an admin administering the workspace over /mcp", () => {
       expect(sent).toEqual([
         expect.objectContaining({
           to: "member@example.com",
-          subject: "Reset your EveryApp password",
+          subject: "Reset your Atura Apps Portal password",
         }),
       ]);
       expect(sent[0]?.text).toMatch(
@@ -2424,7 +2424,7 @@ describe("the events tools over /mcp", () => {
       delivered: true,
       delivery: {
         id: expect.stringMatching(/^dlv_[0-9a-f]{24}$/),
-        event: { type: "ping", summary: "Test event from EveryApp" },
+        event: { type: "ping", summary: "Test event from Atura Apps Portal" },
         subscription: { id: tested, name: "Tested" },
         state: "delivered",
         attempts: 1,

@@ -373,7 +373,7 @@ function unavailable(pathname: string): Response {
     return errorPage(
       503,
       "Something went wrong",
-      "EveryApp couldn't finish this just now. Start connecting again from your AI app in a moment.",
+      "Atura Apps Portal couldn't finish this just now. Start connecting again from your AI app in a moment.",
     );
   }
   if (pathname === MCP_PATH) {
@@ -381,7 +381,10 @@ function unavailable(pathname: string): Response {
       {
         jsonrpc: "2.0",
         id: null,
-        error: { code: -32603, message: "EveryApp is unavailable just now." },
+        error: {
+          code: -32603,
+          message: "Atura Apps Portal is unavailable just now.",
+        },
       },
       { status: 503, headers: { "retry-after": "30" } },
     );

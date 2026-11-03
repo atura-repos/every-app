@@ -236,7 +236,7 @@ export function selfHostedBundleProblems(
     problems.push("the release has no minimum toolchain version");
   else if (compareVersions(release.minCli, gatewayVersion) > 0)
     problems.push(
-      `the release needs EveryApp ${release.minCli}; update this Gateway before installing`,
+      `the release needs Atura Apps Portal ${release.minCli}; update this Gateway before installing`,
     );
   if (
     manifest.migrations?.dialect === "postgresql" ||
@@ -382,7 +382,7 @@ async function installSelfHosted(input: {
     if (live && live !== recorded && !configuration.replaceChangedWorkers)
       throw new InstallationError(
         "WORKER_CHANGED",
-        `${worker.name} was changed outside EveryApp. Confirm replacement before installing.`,
+        `${worker.name} was changed outside Atura Apps Portal. Confirm replacement before installing.`,
         { data: { worker: worker.name } },
       );
   }
