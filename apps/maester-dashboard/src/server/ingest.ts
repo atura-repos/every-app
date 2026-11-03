@@ -145,9 +145,10 @@ export function extractProjection(zip: Uint8Array): Uint8Array {
   const nameLen = view.getUint16(centralOffset + 28, true);
   const extraLen = view.getUint16(centralOffset + 30, true);
   const commentLen = view.getUint16(centralOffset + 32, true);
+  const flags = view.getUint16(centralOffset + 8, true);
   if (
     centralSize !== 46 + nameLen + extraLen + commentLen ||
-    view.getUint16(centralOffset + 8, true) & 9 ||
+    (flags & ~8) !== 0 || // only the optional data-descriptor bit is accepted
     view.getUint32(centralOffset + 24, true) > MAX_JSON ||
     view.getUint32(centralOffset + 20, true) > MAX_ZIP ||
     new TextDecoder().decode(
@@ -156,24 +157,50 @@ export function extractProjection(zip: Uint8Array): Uint8Array {
   )
     fail();
   const local = view.getUint32(centralOffset + 42, true);
+  if (local + 30 > centralOffset || view.getUint32(local, true) !== 0x04034b50)
+    fail();
+  const localNameLength = view.getUint16(local + 26, true);
+  const dataStart =
+    local + 30 + localNameLength + view.getUint16(local + 28, true);
+  const compressedSize = view.getUint32(centralOffset + 20, true);
+  const descriptorStart = dataStart + compressedSize;
+  const descriptorLength = centralOffset - descriptorStart;
   if (
-    local + 30 > centralOffset ||
-    view.getUint32(local, true) !== 0x04034b50 ||
-    view.getUint16(local + 6, true) !==
-      view.getUint16(centralOffset + 8, true) ||
+    view.getUint16(local + 6, true) !== flags ||
     view.getUint16(local + 8, true) !==
       view.getUint16(centralOffset + 10, true) ||
-    view.getUint32(local + 18, true) !==
-      view.getUint32(centralOffset + 20, true) ||
-    view.getUint32(local + 22, true) !==
-      view.getUint32(centralOffset + 24, true) ||
-    view.getUint16(local + 26, true) !== nameLen ||
-    local +
-      30 +
-      nameLen +
-      view.getUint16(local + 28, true) +
-      view.getUint32(local + 18, true) >
-      centralOffset
+    localNameLength !== nameLen ||
+    dataStart > centralOffset ||
+    descriptorStart > centralOffset ||
+    !zip
+      .subarray(local + 30, local + 30 + nameLen)
+      .every((byte, i) => byte === zip[centralOffset + 46 + i])
+  )
+    fail();
+  const crc = view.getUint32(centralOffset + 16, true);
+  const uncompressedSize = view.getUint32(centralOffset + 24, true);
+  if (flags & 8) {
+    if (
+      (descriptorLength !== 12 && descriptorLength !== 16) ||
+      view.getUint32(local + 14, true) !== 0 ||
+      view.getUint32(local + 18, true) !== 0 ||
+      view.getUint32(local + 22, true) !== 0
+    )
+      fail();
+    const values = descriptorStart + (descriptorLength === 16 ? 4 : 0);
+    if (
+      (descriptorLength === 16 &&
+        view.getUint32(descriptorStart, true) !== 0x08074b50) ||
+      view.getUint32(values, true) !== crc ||
+      view.getUint32(values + 4, true) !== compressedSize ||
+      view.getUint32(values + 8, true) !== uncompressedSize
+    )
+      fail();
+  } else if (
+    descriptorLength !== 0 ||
+    view.getUint32(local + 14, true) !== crc ||
+    view.getUint32(local + 18, true) !== compressedSize ||
+    view.getUint32(local + 22, true) !== uncompressedSize
   )
     fail();
   let output: Uint8Array | undefined;

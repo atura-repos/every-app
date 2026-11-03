@@ -5,7 +5,12 @@ import { drizzle } from "drizzle-orm/libsql";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as schema from "@/db/schema";
 import { zipSync, strToU8 } from "fflate";
-import { reconcile, validateExport, expireImports } from "./ingest";
+import {
+  reconcile,
+  validateExport,
+  expireImports,
+  extractProjection,
+} from "./ingest";
 
 const pem = await crypto.subtle.generateKey(
   {
@@ -37,6 +42,31 @@ const doc = {
 };
 const zip = (value: unknown) =>
   zipSync({ "dashboard-result-v1.json": strToU8(JSON.stringify(value)) });
+// GitHub's upload-artifact ZIP uses flag bit 3 and a trailing data descriptor.
+function zipWithDescriptor(value: unknown) {
+  const original = zip(value);
+  const end = new DataView(
+    original.buffer,
+    original.byteOffset,
+    original.byteLength,
+  );
+  const central = end.getUint32(original.length - 6, true);
+  const result = new Uint8Array(original.length + 16);
+  result.set(original.subarray(0, central));
+  result.set(original.subarray(central), central + 16);
+  const view = new DataView(result.buffer);
+  view.setUint16(6, 8, true);
+  view.setUint32(14, 0, true);
+  view.setUint32(18, 0, true);
+  view.setUint32(22, 0, true);
+  view.setUint32(central, 0x08074b50, true);
+  view.setUint32(central + 4, end.getUint32(central + 16, true), true);
+  view.setUint32(central + 8, end.getUint32(central + 20, true), true);
+  view.setUint32(central + 12, end.getUint32(central + 24, true), true);
+  view.setUint16(central + 16 + 8, 8, true);
+  view.setUint32(result.length - 6, central + 16, true);
+  return result;
+}
 let client: ReturnType<typeof createClient>;
 let db: D1Database;
 let objects: Map<string, Uint8Array>;
@@ -157,6 +187,21 @@ beforeEach(async () => {
 });
 
 describe("validated private reconciliation", () => {
+  it("accepts the data-descriptor ZIP emitted by GitHub Actions", () => {
+    const body = extractProjection(zipWithDescriptor(doc));
+    expect(
+      validateExport(JSON.parse(new TextDecoder().decode(body)), "atura"),
+    ).toEqual(doc);
+  });
+  it("rejects a forged data descriptor even if the ZIP central directory is intact", () => {
+    const tampered = zipWithDescriptor(doc);
+    const end = new DataView(tampered.buffer);
+    const central = end.getUint32(tampered.length - 6, true);
+    end.setUint32(central - 4, 0, true);
+    expect(() => extractProjection(tampered)).toThrow(
+      "Private import rejected",
+    );
+  });
   it("rejects unknown fields, malformed scope, duplicates, unsafe titles and oversized export", () => {
     expect(() => validateExport({ ...doc, raw: "secret" }, "atura")).toThrow();
     expect(() =>
