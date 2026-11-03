@@ -10,20 +10,30 @@ export const tenantRegistry = sqliteTable("tenant_registry", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
 });
-// Operator-provisioned only: immutable repository ID binds tenant and installation.
-export const githubSources = sqliteTable("github_sources", {
+// One immutable repository identity per tenant; workflow rows cannot redefine it.
+export const githubRepositories = sqliteTable("github_repositories", {
+  repoId: integer("repo_id").primaryKey(),
   tenantId: text("tenant_id")
     .notNull()
     .references(() => tenantRegistry.id),
-  repoId: integer("repo_id").primaryKey(),
   owner: text("owner").notNull(),
   repo: text("repo").notNull(),
   installationId: integer("installation_id").notNull(),
-  workflowId: integer("workflow_id").notNull(),
-  workflowRef: text("workflow_ref").notNull(),
-  artifactName: text("artifact_name").notNull(),
-  enabled: integer("enabled").notNull(),
 });
+export const githubSources = sqliteTable(
+  "github_sources",
+  {
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => githubRepositories.repoId),
+    workflowId: integer("workflow_id").notNull(),
+    workflowRef: text("workflow_ref").notNull(),
+    workflowPath: text("workflow_path").notNull(),
+    artifactName: text("artifact_name").notNull(),
+    enabled: integer("enabled").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.repoId, table.workflowId] })],
+);
 export const artifactIndex = sqliteTable("artifact_index", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id")

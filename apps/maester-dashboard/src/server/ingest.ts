@@ -251,6 +251,7 @@ type Source = {
   installation_id: number;
   workflow_id: number;
   workflow_ref: string;
+  workflow_path: string;
   artifact_name: string;
 };
 type Settings = { GITHUB_APP_ID?: string; GITHUB_APP_PRIVATE_KEY?: string };
@@ -366,7 +367,7 @@ export async function reconcile(
 ): Promise<void> {
   const { results } = await db
     .prepare(
-      "SELECT tenant_id,repo_id,owner,repo,installation_id,workflow_id,workflow_ref,artifact_name FROM github_sources WHERE enabled=1 LIMIT 20",
+      "SELECT r.tenant_id,s.repo_id,r.owner,r.repo,r.installation_id,s.workflow_id,s.workflow_ref,s.workflow_path,s.artifact_name FROM github_sources s JOIN github_repositories r ON r.repo_id=s.repo_id WHERE s.enabled=1 LIMIT 20",
     )
     .all<Source>();
   for (const source of results) {
@@ -378,6 +379,9 @@ export async function reconcile(
       !tokenSafe(source.owner) ||
       !tokenSafe(source.repo) ||
       !tokenSafe(source.artifact_name) ||
+      !/^\.github\/workflows\/[a-zA-Z0-9_.-]+\.ya?ml$/.test(
+        source.workflow_path,
+      ) ||
       !/^refs\/heads\/[a-zA-Z0-9_.\/-]+$/.test(source.workflow_ref)
     )
       fail();
@@ -406,6 +410,12 @@ export async function reconcile(
           ) ||
           !record(run.head_repository) ||
           run.head_repository.id !== source.repo_id ||
+          run.workflow_id !== source.workflow_id ||
+          ![
+            source.workflow_path,
+            `${source.workflow_path}@${source.workflow_ref}`,
+            `${source.workflow_path}@${source.workflow_ref.slice(11)}`,
+          ].includes(run.path as string) ||
           run.head_branch !== source.workflow_ref.slice(11) ||
           !/^[a-f0-9]{40}$/.test(run.head_sha as string) ||
           !iso(run.created_at) ||
@@ -514,6 +524,7 @@ export async function reconcile(
           await bucket.delete(objectKey);
           fail();
         }
+        let batchStarted = false;
         try {
           const expires = new Date(run.created_at as string);
           expires.setUTCFullYear(expires.getUTCFullYear() + 1);
@@ -555,6 +566,7 @@ export async function reconcile(
                 expires.toISOString(),
               ),
           ];
+          batchStarted = true;
           await db.batch(statements);
           const row = await db
             .prepare(
@@ -564,7 +576,26 @@ export async function reconcile(
             .first<{ digest: string }>();
           if (row?.digest !== hash) fail();
         } catch {
-          await bucket.delete(objectKey);
+          // A failed batch response/readback does not prove D1 rolled back.
+          // Keep R2: a committed index must never reference a deleted object.
+          if (!batchStarted) await bucket.delete(objectKey);
+          else {
+            try {
+              await db
+                .prepare(
+                  "INSERT OR IGNORE INTO import_events(id,tenant_id,code,observed_at) VALUES (?,?,?,?)",
+                )
+                .bind(
+                  `${id}:readback`,
+                  source.tenant_id,
+                  "readback_unverified",
+                  now.toISOString(),
+                )
+                .run();
+            } catch {
+              /* D1 may be unavailable; preserve R2 regardless. */
+            }
+          }
           fail();
         }
       }

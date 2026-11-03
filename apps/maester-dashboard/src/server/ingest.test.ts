@@ -1,5 +1,6 @@
 import { createClient } from "@libsql/client";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { drizzle } from "drizzle-orm/libsql";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -85,7 +86,10 @@ beforeEach(async () => {
     "INSERT INTO tenant_registry(id,name) VALUES ('atura','Atura')",
   );
   await client.execute(
-    "INSERT INTO github_sources(tenant_id,repo_id,owner,repo,installation_id,workflow_id,workflow_ref,artifact_name,enabled) VALUES ('atura',42,'atura','scanner',7,12,'refs/heads/main','maester-atura-dashboard',1)",
+    "INSERT INTO github_repositories(repo_id,tenant_id,owner,repo,installation_id) VALUES (42,'atura','atura','scanner',7)",
+  );
+  await client.execute(
+    "INSERT INTO github_sources(repo_id,workflow_id,workflow_ref,workflow_path,artifact_name,enabled) VALUES (42,12,'refs/heads/main','.github/workflows/maester.yml','maester-atura-dashboard',1)",
   );
   db = {
     prepare(sql: string) {
@@ -157,7 +161,8 @@ beforeEach(async () => {
             head_sha: "a".repeat(40),
             created_at: "2026-11-02T00:00:00Z",
             conclusion: "failure",
-            path: ".github/workflows/maester.yml",
+            workflow_id: 12,
+            path: ".github/workflows/maester.yml@refs/heads/main",
           },
         ],
       });
@@ -285,6 +290,193 @@ describe("validated private reconciliation", () => {
       calls.some((url) => url.includes("/installation/repositories")),
     ).toBe(false);
   });
+  it("migrates existing source rows without silently enabling unverified paths", async () => {
+    const legacy = createClient({ url: ":memory:" });
+    await legacy.execute(
+      "CREATE TABLE tenant_registry(id text PRIMARY KEY, name text NOT NULL)",
+    );
+    await legacy.execute(
+      "INSERT INTO tenant_registry VALUES ('atura','Atura')",
+    );
+    await legacy.execute(
+      "CREATE TABLE github_sources(tenant_id text NOT NULL, repo_id integer PRIMARY KEY, owner text NOT NULL, repo text NOT NULL, installation_id integer NOT NULL, workflow_id integer NOT NULL, workflow_ref text NOT NULL, artifact_name text NOT NULL, enabled integer NOT NULL)",
+    );
+    await legacy.execute(
+      "INSERT INTO github_sources VALUES ('atura',42,'atura','scanner',7,12,'refs/heads/main','maester-atura-dashboard',1)",
+    );
+    const sql = readFileSync(
+      fileURLToPath(
+        new URL("../../drizzle/0005_dry_cassandra_nova.sql", import.meta.url),
+      ),
+      "utf8",
+    );
+    for (const statement of sql.split("--> statement-breakpoint")) {
+      if (statement.trim()) await legacy.execute(statement);
+    }
+    expect(
+      (
+        await legacy.execute(
+          "SELECT tenant_id,repo_id FROM github_repositories",
+        )
+      ).rows,
+    ).toMatchObject([{ tenant_id: "atura", repo_id: 42 }]);
+    expect(
+      (await legacy.execute("SELECT workflow_path,enabled FROM github_sources"))
+        .rows,
+    ).toMatchObject([{ workflow_path: "", enabled: 0 }]);
+    expect(
+      (await legacy.execute("PRAGMA foreign_key_check")).rows,
+    ).toHaveLength(0);
+    await legacy.close();
+  });
+  it("stores four workflows in one repository but prohibits a second tenant for that repository", async () => {
+    for (const [id, name] of [
+      [13, "maester-atura-cis-graph-dashboard"],
+      [14, "maester-atura-cis-exo-dashboard"],
+      [15, "maester-atura-cis-teams-dashboard"],
+    ] as const) {
+      await client.execute({
+        sql: "INSERT INTO github_sources(repo_id,workflow_id,workflow_ref,workflow_path,artifact_name,enabled) VALUES (?,?,?,?,?,1)",
+        args: [42, id, "refs/heads/main", `.github/workflows/${id}.yml`, name],
+      });
+    }
+    expect(
+      (await client.execute("SELECT * FROM github_sources WHERE repo_id=42"))
+        .rows,
+    ).toHaveLength(4);
+    await client.execute(
+      "INSERT INTO tenant_registry(id,name) VALUES ('other','Other')",
+    );
+    await expect(
+      client.execute(
+        "INSERT INTO github_repositories(repo_id,tenant_id,owner,repo,installation_id) VALUES (42,'other','other','scanner',7)",
+      ),
+    ).rejects.toThrow();
+    await expect(
+      client.execute(
+        "UPDATE github_repositories SET tenant_id='other' WHERE repo_id=42",
+      ),
+    ).rejects.toThrow();
+  });
+  it("rejects a run from a different workflow despite the workflow-list endpoint", async () => {
+    const original = fetcher;
+    fetcher = (async (url: string, init?: RequestInit) => {
+      if (url.includes("/workflows/12/runs")) {
+        const response = await original(url, init);
+        const data = (await response.json()) as {
+          workflow_runs: Record<string, unknown>[];
+        };
+        return Response.json({
+          workflow_runs: [{ ...data.workflow_runs[0], workflow_id: 13 }],
+        });
+      }
+      return original(url, init);
+    }) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect((await client.execute("SELECT * FROM scan_runs")).rows).toHaveLength(
+      0,
+    );
+    expect(calls.some((url) => url.includes("/runs/100/artifacts"))).toBe(
+      false,
+    );
+  });
+  it("accepts GitHub's live bare workflow path when branch identity matches", async () => {
+    const original = fetcher;
+    fetcher = (async (url: string, init?: RequestInit) => {
+      if (url.includes("/workflows/12/runs")) {
+        const response = await original(url, init);
+        const data = (await response.json()) as {
+          workflow_runs: Record<string, unknown>[];
+        };
+        return Response.json({
+          workflow_runs: [
+            { ...data.workflow_runs[0], path: ".github/workflows/maester.yml" },
+          ],
+        });
+      }
+      return original(url, init);
+    }) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect((await client.execute("SELECT * FROM scan_runs")).rows).toHaveLength(
+      1,
+    );
+  });
+  it("rejects a run with a different workflow path or ref", async () => {
+    const original = fetcher;
+    fetcher = (async (url: string, init?: RequestInit) => {
+      if (url.includes("/workflows/12/runs")) {
+        const response = await original(url, init);
+        const data = (await response.json()) as {
+          workflow_runs: Record<string, unknown>[];
+        };
+        return Response.json({
+          workflow_runs: [
+            {
+              ...data.workflow_runs[0],
+              path: ".github/workflows/other.yml@refs/heads/main",
+            },
+          ],
+        });
+      }
+      return original(url, init);
+    }) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect((await client.execute("SELECT * FROM scan_runs")).rows).toHaveLength(
+      0,
+    );
+  });
+  it("rejects a run whose path suffix names a different branch", async () => {
+    const original = fetcher;
+    fetcher = (async (url: string, init?: RequestInit) => {
+      if (url.includes("/workflows/12/runs")) {
+        const response = await original(url, init);
+        const data = (await response.json()) as {
+          workflow_runs: Record<string, unknown>[];
+        };
+        return Response.json({
+          workflow_runs: [
+            {
+              ...data.workflow_runs[0],
+              path: ".github/workflows/maester.yml@refs/heads/other",
+            },
+          ],
+        });
+      }
+      return original(url, init);
+    }) as typeof fetch;
+    await reconcile(db, bucket, settings, fetcher, now);
+    expect((await client.execute("SELECT * FROM scan_runs")).rows).toHaveLength(
+      0,
+    );
+  });
+  it("keeps R2 bytes when a committed D1 batch has a failed readback", async () => {
+    const actual = db;
+    db = {
+      ...actual,
+      prepare(sql: string) {
+        const statement = actual.prepare(sql);
+        if (!sql.includes("SELECT digest FROM artifact_index"))
+          return statement;
+        return {
+          ...statement,
+          bind(...args: unknown[]) {
+            const bound = statement.bind(...args);
+            return { ...bound, first: async () => null };
+          },
+        } as D1PreparedStatement;
+      },
+    } as D1Database;
+    await expect(reconcile(db, bucket, settings, fetcher, now)).rejects.toThrow(
+      "Private import rejected",
+    );
+    const rows = (await client.execute("SELECT object_key FROM artifact_index"))
+      .rows;
+    expect(rows).toHaveLength(1);
+    expect(objects.has(rows[0].object_key as string)).toBe(true);
+    expect(
+      (await client.execute("SELECT code FROM import_events")).rows,
+    ).toEqual([{ code: "readback_unverified" }]);
+  });
   it("records missing projection as technical import state without importing legacy HTML", async () => {
     const original = fetcher;
     fetcher = (async (url: string, init?: RequestInit) =>
@@ -348,6 +540,8 @@ describe("validated private reconciliation", () => {
                 head_sha: "a".repeat(40),
                 created_at: "2026-11-02T00:00:00Z",
                 conclusion: "failure",
+                workflow_id: 12,
+                path: ".github/workflows/maester.yml@refs/heads/main",
               },
             ],
           })

@@ -36,6 +36,13 @@
       "when": 1793720778001,
       "tag": "0004_military_the_spike",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793721169818,
+      "tag": "0005_dry_cassandra_nova",
+      "breakpoints": true
     }
   ]
 }
