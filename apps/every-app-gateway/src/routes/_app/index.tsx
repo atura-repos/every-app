@@ -104,6 +104,9 @@ function App() {
     togglePin,
     setLayout,
     moveApp,
+    conflict,
+    reloadConflict,
+    reapplyConflict,
   } = useAppLibrary();
   const {
     data: personalLinks,
@@ -254,6 +257,25 @@ function App() {
             ) : null
           }
         />
+        {conflict ? (
+          <div
+            role="alert"
+            className="rounded-md border border-destructive p-4"
+          >
+            <p>
+              Layout changed in another browser. Your unsaved change was not
+              applied.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => void reloadConflict()}>
+                Load latest layout
+              </Button>
+              <Button variant="outline" onClick={() => void reapplyConflict()}>
+                Reapply my change
+              </Button>
+            </div>
+          </div>
+        ) : null}
         {isError ? (
           <ErrorState title="Failed to load apps" message="Please try again." />
         ) : null}

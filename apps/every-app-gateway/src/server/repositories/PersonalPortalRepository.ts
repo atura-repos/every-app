@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { personalLinks, portalPreferences } from "@/db/schema";
 
@@ -6,7 +6,15 @@ export type PortalPreferences = {
   pinnedIds: string[];
   orderedIds: string[];
   layout: "grid" | "list";
+  revision?: number;
 };
+
+export class PortalPreferencesConflict extends Error {
+  readonly code = "PORTAL_PREFERENCES_CONFLICT";
+  constructor() {
+    super("Portal layout changed elsewhere");
+  }
+}
 
 const owner = (organizationId: string, userId: string) =>
   and(
@@ -76,22 +84,44 @@ export const PersonalPortalRepository = {
           pinnedIds: row.pinnedIds,
           orderedIds: row.orderedIds,
           layout: row.layout,
+          revision: row.revision,
         }
       : undefined;
   },
-  savePreferences: (
+  savePreferences: async (
     organizationId: string,
     userId: string,
     data: PortalPreferences,
-  ) =>
-    db
-      .insert(portalPreferences)
-      .values({ organizationId, userId, ...data })
-      .onConflictDoUpdate({
-        target: [portalPreferences.organizationId, portalPreferences.userId],
-        set: data,
-      })
-      .run(),
+    expectedRevision: number,
+  ) => {
+    const values = {
+      pinnedIds: data.pinnedIds,
+      orderedIds: data.orderedIds,
+      layout: data.layout,
+    };
+    let row;
+    if (expectedRevision === 0) {
+      row = await db
+        .insert(portalPreferences)
+        .values({ organizationId, userId, ...values, revision: 1 })
+        .onConflictDoNothing()
+        .returning()
+        .get();
+    }
+    row ??= await db
+      .update(portalPreferences)
+      .set({ ...values, revision: sql`${portalPreferences.revision} + 1` })
+      .where(
+        and(
+          preferencesOwner(organizationId, userId),
+          eq(portalPreferences.revision, expectedRevision),
+        ),
+      )
+      .returning()
+      .get();
+    if (!row) throw new PortalPreferencesConflict();
+    return { ...values, revision: row.revision };
+  },
   // Import only if no server preference exists: a stale browser cannot roll back another device.
   importPreferences: (
     organizationId: string,

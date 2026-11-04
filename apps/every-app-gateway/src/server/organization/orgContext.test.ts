@@ -61,20 +61,27 @@ describe("resolveOrgContext", () => {
     );
   });
 
-  it("uses a cached membership on the second lookup", async () => {
-    mockFindFirst.mockResolvedValue({
-      organizationId: "org-1",
-      role: "member",
-    });
+  it("reads a downgraded role on the next request even in a stale isolate", async () => {
+    mockFindFirst
+      .mockResolvedValueOnce({ organizationId: "org-1", role: "admin" })
+      .mockResolvedValueOnce({ organizationId: "org-1", role: "member" });
+    const input = { userId: "user-1", activeOrganizationId: "org-1" };
 
-    const input = {
-      userId: "user-1",
-      activeOrganizationId: "org-1",
-    };
-    await resolveOrgContext(input);
-    await resolveOrgContext(input);
+    expect((await resolveOrgContext(input))?.role).toBe("admin");
+    // Another isolate made the write; this isolate did not receive forgetOrgContext.
+    expect((await resolveOrgContext(input))?.role).toBe("member");
+    expect(mockFindFirst).toHaveBeenCalledTimes(2);
+  });
 
-    expect(mockFindFirst).toHaveBeenCalledTimes(1);
+  it("rejects a removed member on the next request without local invalidation", async () => {
+    mockFindFirst
+      .mockResolvedValueOnce({ organizationId: "org-1", role: "admin" })
+      .mockResolvedValueOnce(undefined);
+    const input = { userId: "user-1", activeOrganizationId: "org-1" };
+
+    expect((await resolveOrgContext(input))?.role).toBe("admin");
+    await expect(resolveOrgContext(input)).resolves.toBeNull();
+    expect(mockFindFirst).toHaveBeenCalledTimes(2);
   });
 
   it("refetches membership after the cache TTL expires", async () => {

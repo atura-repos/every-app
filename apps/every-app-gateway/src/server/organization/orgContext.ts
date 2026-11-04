@@ -42,8 +42,9 @@ export function clearOrgContextCacheForTests(): void {
 }
 
 /**
- * Drop this isolate's cached memberships for a user after changing their
- * role or deactivating them (other isolates catch up within the TTL).
+ * Drop this isolate's cached denials after a membership grant. Positive
+ * memberships are never cached, so other isolates see revocation on their
+ * next database-backed authorization check.
  */
 export function forgetOrgContext(userId: string): void {
   for (const key of orgContextCache.keys()) {
@@ -80,15 +81,17 @@ export async function resolveOrgContext({
     activeOrganizationId,
   });
 
-  // Per-isolate security tradeoff: membership revocation can take up to this
-  // 30s TTL to propagate to the perimeter, matching the registry cache.
-  orgContextCache.set(cacheKey, {
-    context,
-    expiresAt: now + ORG_CONTEXT_CACHE_TTL_MS,
-  });
-  if (orgContextCache.size > ORG_CONTEXT_CACHE_MAX_ENTRIES) {
-    const oldest = orgContextCache.keys().next().value;
-    if (oldest) orgContextCache.delete(oldest);
+  // Cache denials only. A positive membership/role must be read from D1 on
+  // every request: a write in another isolate cannot invalidate this Map.
+  if (!context) {
+    orgContextCache.set(cacheKey, {
+      context: null,
+      expiresAt: now + ORG_CONTEXT_CACHE_TTL_MS,
+    });
+    if (orgContextCache.size > ORG_CONTEXT_CACHE_MAX_ENTRIES) {
+      const oldest = orgContextCache.keys().next().value;
+      if (oldest) orgContextCache.delete(oldest);
+    }
   }
 
   return context;

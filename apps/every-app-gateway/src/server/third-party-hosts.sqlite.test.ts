@@ -493,6 +493,63 @@ describe("third-party hosts with per-host sessions (SQLite)", () => {
     });
   });
 
+  it("does not reuse a stale admin role after a downgrade in another isolate", async () => {
+    const gatewayCookie = await signIn(alice.email);
+    const session = await hostSession(gatewayCookie);
+    expect(
+      (await get(`https://${TODO_HOST}/tasks`, { cookie: session })).status,
+    ).toBe(200);
+    expect(lastIdentity().org_role).toBe("owner");
+
+    // No cache clear: a different isolate updated the membership row.
+    await db
+      .update(members)
+      .set({ role: "member" })
+      .where(
+        and(eq(members.organizationId, acme), eq(members.userId, alice.userId)),
+      );
+    expect(
+      (await get(`https://${TODO_HOST}/tasks`, { cookie: session })).status,
+    ).toBe(200);
+    expect(lastIdentity().org_role).toBe("member");
+  });
+
+  it("rejects sibling-origin and missing-origin authenticated handoffs", async () => {
+    const cookie = await signIn(alice.email);
+    const { location } = await startOn(TODO_HOST);
+    const form = new URLSearchParams({
+      return_to: location.searchParams.get("return_to")!,
+      nonce_hash: location.searchParams.get("nonce_hash")!,
+    }).toString();
+    const request = (headers: Record<string, string>) =>
+      server.fetch(
+        new Request(`${GATEWAY}/app-session/start`, {
+          method: "POST",
+          headers: {
+            host: BASE,
+            cookie,
+            "content-type": "application/x-www-form-urlencoded",
+            ...headers,
+          },
+          body: form,
+        }),
+      );
+    expect(
+      (
+        await request({
+          origin: "https://todo.app.everyapp.com",
+          "sec-fetch-site": "same-site",
+        })
+      ).status,
+    ).toBe(403);
+    expect((await request({})).status).toBe(403);
+    const accepted = await request({
+      origin: GATEWAY,
+      "sec-fetch-site": "same-origin",
+    });
+    expect(accepted.status).toBe(303);
+  });
+
   it("sends a signed-out browser to sign in, and back to the handoff", async () => {
     const { location } = await startOn(TODO_HOST);
     const continuePage = await get(location.toString());

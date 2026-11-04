@@ -1,18 +1,15 @@
-import { useEffect, useMemo, useRef } from "react";
-import { useLiveQuery } from "@tanstack/react-db";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { getErrorCode } from "@/client/errors";
 import { useSession } from "@/client/hooks/useSession";
 import {
   DEPLOYING_POLL_MS,
   hasDeployingApp,
   isMcpApp,
 } from "@/client/lib/appStatus";
-import {
-  userAppsCollection,
-  useQueryFailed,
-  useQueryPending,
-} from "@/client/tanstack-db";
+import { userAppsCollection } from "@/client/tanstack-db";
+import { getMyApps } from "@/serverFunctions/apps";
 import {
   getPortalPreferences,
   importPortalPreferences,
@@ -32,11 +29,15 @@ export enum AppLibraryLayout {
 
 /** Preferences are read and written for the authenticated account on the server. */
 export function useAppLibrary() {
-  const { data: session } = useSession();
-  const userId = session?.user.id;
-  const orgId = session?.session.activeOrganizationId;
+  const session = useSession();
+  const userId = session.data?.user.id;
+  const orgId = session.data?.session.activeOrganizationId;
+  const validated =
+    session.isFetchedAfterMount && !session.isFetching && !session.error;
   const key = ["portal-preferences", userId, orgId];
   const client = useQueryClient();
+  const [conflictAccount, setConflictAccount] = useState("");
+  const conflictDraft = useRef<PortalPreferences | null>(null);
   const identity =
     userId && orgId ? ["portal-preferences", userId, orgId] : null;
   const account = identity?.join(":") ?? "";
@@ -63,6 +64,7 @@ export function useAppLibrary() {
       client.setQueryData(previous.identity, previous.confirmed);
     }
     previous.pending = null;
+    conflictDraft.current = null;
     saves.current = {
       account,
       identity,
@@ -73,7 +75,9 @@ export function useAppLibrary() {
   }
   const preferencesQuery = useQuery({
     queryKey: key,
-    enabled: typeof window !== "undefined" && Boolean(userId && orgId),
+    enabled:
+      typeof window !== "undefined" && Boolean(userId && orgId && validated),
+    meta: { persist: false },
     queryFn: async () => {
       const existing = await getPortalPreferences();
       if (existing) return existing;
@@ -109,20 +113,45 @@ export function useAppLibrary() {
       return imported;
     },
   });
-  const preferences = preferencesQuery.data ?? emptyPortalPreferences;
-  const query = useLiveQuery((q) => q.from({ app: userAppsCollection }));
-  const failed = useQueryFailed(["user-apps"]);
-  const pending = useQueryPending(["user-apps"]);
+  // Read the ACL result per identity, rather than the shared collection's
+  // unscoped rows. A failed refetch may leave old data in React Query.
+  const appsQuery = useQuery({
+    queryKey: ["user-apps", userId, orgId],
+    enabled: Boolean(userId && orgId && validated),
+    meta: { persist: false },
+    queryFn: async () => (await getMyApps()).apps,
+  });
+  const authorized =
+    validated &&
+    appsQuery.isFetchedAfterMount &&
+    !appsQuery.isFetching &&
+    !appsQuery.isError
+      ? appsQuery.data
+      : undefined;
+  const preferences =
+    validated &&
+    preferencesQuery.isFetchedAfterMount &&
+    !preferencesQuery.isFetching &&
+    !preferencesQuery.isError &&
+    authorized
+      ? (preferencesQuery.data ?? emptyPortalPreferences)
+      : emptyPortalPreferences;
   const isLoading =
-    (!query.isReady && !query.isError) || pending || preferencesQuery.isPending;
+    !validated ||
+    (!appsQuery.isError && !authorized) ||
+    (!preferencesQuery.isError &&
+      (!preferencesQuery.isFetchedAfterMount || preferencesQuery.isFetching));
   const pinnedIds = useMemo(
     () => new Set(preferences.pinnedIds),
     [preferences.pinnedIds],
   );
   // Only sort authorized rows; a saved preference never reintroduces a revoked app.
   const apps = useMemo(
-    () => (isLoading ? [] : orderAuthorizedApps([...query.data], preferences)),
-    [isLoading, query.data, preferences],
+    () =>
+      isLoading || !authorized || preferencesQuery.isError
+        ? []
+        : orderAuthorizedApps([...authorized], preferences),
+    [isLoading, authorized, preferences, preferencesQuery.isError],
   );
   const deploying = hasDeployingApp(apps);
   useEffect(() => {
@@ -136,7 +165,17 @@ export function useAppLibrary() {
   const update = (
     change: (current: PortalPreferences) => PortalPreferences,
   ) => {
-    if (!identity || !preferencesQuery.data) return;
+    if (
+      !identity ||
+      conflictAccount === account ||
+      !authorized ||
+      !validated ||
+      preferencesQuery.isFetching ||
+      !preferencesQuery.isFetchedAfterMount ||
+      preferencesQuery.isError ||
+      !preferencesQuery.data
+    )
+      return;
     const queue = saves.current;
     const current =
       client.getQueryData<PortalPreferences>(identity) ?? preferencesQuery.data;
@@ -154,11 +193,29 @@ export function useAppLibrary() {
         const value = queue.pending;
         queue.pending = null;
         try {
-          await savePortalPreferences({ data: value });
-          queue.confirmed = value;
-        } catch {
-          toast.error("Could not save your app preferences.");
-          if (!queue.pending && queue.confirmed) {
+          const saved = await savePortalPreferences({
+            data: {
+              pinnedIds: value.pinnedIds,
+              orderedIds: value.orderedIds,
+              layout: value.layout,
+              expectedRevision: queue.confirmed?.revision ?? 0,
+            },
+          });
+          queue.confirmed = {
+            ...value,
+            revision: saved?.revision ?? (queue.confirmed?.revision ?? 0) + 1,
+          };
+          if (!queue.pending && currentAccount.current === account)
+            client.setQueryData(identity, queue.confirmed);
+        } catch (error) {
+          if (getErrorCode(error) === "PORTAL_PREFERENCES_CONFLICT") {
+            conflictDraft.current = queue.pending ?? value;
+            queue.pending = null;
+            if (currentAccount.current === account) setConflictAccount(account);
+          } else {
+            toast.error("Could not save your app preferences.");
+          }
+          if (queue.confirmed && currentAccount.current === account) {
             client.setQueryData(identity, queue.confirmed);
           }
         }
@@ -166,10 +223,41 @@ export function useAppLibrary() {
       queue.running = false;
     })();
   };
+  const resolveConflict = async (reapply: boolean) => {
+    if (!identity || conflictAccount !== account) return;
+    const draft = conflictDraft.current;
+    try {
+      const latest = await getPortalPreferences();
+      if (currentAccount.current !== account || !latest) return;
+      saves.current.confirmed = latest;
+      client.setQueryData(identity, latest);
+      if (reapply && draft) {
+        const saved = await savePortalPreferences({
+          data: {
+            pinnedIds: draft.pinnedIds,
+            orderedIds: draft.orderedIds,
+            layout: draft.layout,
+            expectedRevision: latest.revision ?? 0,
+          },
+        });
+        if (currentAccount.current !== account) return;
+        client.setQueryData(identity, saved);
+        saves.current.confirmed = saved;
+      }
+      conflictDraft.current = null;
+      setConflictAccount("");
+    } catch (error) {
+      if (getErrorCode(error) !== "PORTAL_PREFERENCES_CONFLICT")
+        toast.error("Could not reload your app preferences.");
+    }
+  };
   return {
+    conflict: conflictAccount === account,
+    reloadConflict: () => resolveConflict(false),
+    reapplyConflict: () => resolveConflict(true),
     apps,
     isLoading,
-    isError: query.isError || failed || preferencesQuery.isError,
+    isError: appsQuery.isError || preferencesQuery.isError,
     pinnedIds,
     pinnedApps: apps.filter((app) => pinnedIds.has(app.id)),
     layout: preferences.layout as AppLibraryLayout,
@@ -186,7 +274,7 @@ export function useAppLibrary() {
     },
     moveApp: (appId: string, direction: -1 | 1) => {
       update((current) => {
-        const ordered = orderAuthorizedApps([...query.data], current);
+        const ordered = orderAuthorizedApps([...apps], current);
         const app = ordered.find((candidate) => candidate.id === appId);
         if (!app) return current;
         const section = ordered.filter(

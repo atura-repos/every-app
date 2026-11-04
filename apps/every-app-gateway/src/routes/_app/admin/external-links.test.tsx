@@ -270,6 +270,11 @@ describe("admin external links", () => {
   });
   it("creates a navigation link without app registration", async () => {
     await mount();
+    await act(async () =>
+      Array.from(container.querySelectorAll("button"))
+        .find((b) => b.textContent === "Everyone")!
+        .click(),
+    );
     await submit("Risk", "https://example.org/");
     expect(mocks.create).toHaveBeenCalledWith({
       data: {
@@ -278,6 +283,43 @@ describe("admin external links", () => {
         access: { everyone: true, userIds: [], groupIds: [] },
       },
     });
+  });
+  it("requires explicit audience and hostname re-entry", async () => {
+    await mount();
+    await submit("Risk", "https://example.org/");
+    expect(mocks.create).not.toHaveBeenCalled();
+    await act(async () =>
+      Array.from(container.querySelectorAll("button"))
+        .find((b) => b.textContent === "Everyone")!
+        .click(),
+    );
+    await submit("Risk", "https://example.org/");
+    expect(mocks.create).toHaveBeenCalledOnce();
+    mocks.links = [
+      {
+        id: "b500803e-444f-4000-8000-000000000000",
+        organizationId: "org-a",
+        name: "Risk",
+        url: "https://example.org/",
+        everyone: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ];
+    await mount();
+    await act(async () =>
+      Array.from(container.querySelectorAll("button"))
+        .find((b) => b.textContent === "Edit")!
+        .click(),
+    );
+    await act(async () =>
+      container
+        .querySelector("form")!
+        .dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        ),
+    );
+    expect(mocks.update).not.toHaveBeenCalled();
   });
   it("edits and deletes an existing link", async () => {
     const id = "b500803e-444f-4000-8000-000000000000";
@@ -299,6 +341,16 @@ describe("admin external links", () => {
         .click();
     });
     await act(async () => {
+      const input = Array.from(container.querySelectorAll("input")).find(
+        (i) => i.autocomplete === "off",
+      )!;
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )!.set!.call(input, "example.org");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
       container
         .querySelector("form")!
         .dispatchEvent(
@@ -310,6 +362,7 @@ describe("admin external links", () => {
         id,
         name: "Risk",
         url: "https://example.org/",
+        confirmedHostname: "example.org",
         access: { everyone: true, userIds: [], groupIds: [] },
       },
     });

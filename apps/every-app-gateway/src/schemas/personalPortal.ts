@@ -14,6 +14,9 @@ export const portalPreferencesSchema = z.object({
   orderedIds: ids,
   layout: z.enum(["grid", "list"]),
 });
+export const portalPreferencesSaveSchema = portalPreferencesSchema.extend({
+  expectedRevision: z.number().int().nonnegative().safe(),
+});
 export const portalPreferencesImportSchema = z.object({
   expectedUserId: z.string().min(1),
   expectedOrgId: z.string().min(1),

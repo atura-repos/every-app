@@ -307,18 +307,16 @@ describe("what an app-host request costs (SQLite)", () => {
     for (const row of [fresh, warm, script, fetch, expired]) {
       expect(row.status).toBe(200);
     }
-    // The live reads the threat model requires on every request
-    // (perimeter.cache-bounded-revocation): the session with its user, and
-    // the person's user_app_access row. Better Auth reads the session and
-    // the user one after the other.
-    expect(warm.roundTrips).toBe(3);
-    expect(warm.statements).toBe(3);
+    // Membership and role are now also read on every request across isolates.
+    // Better Auth reads session and user, then membership and app access.
+    expect(warm.roundTrips).toBe(4);
+    expect(warm.statements).toBe(4);
     expect(script.roundTrips).toBe(warm.roundTrips);
     expect(fetch.roundTrips).toBe(warm.roundTrips);
-    // Expired caches add the hostname row before anything, the membership
-    // after the user, and the organization's status beside the access row.
-    expect(expired.roundTrips).toBe(warm.roundTrips + 2);
-    expect(expired.statements).toBe(warm.statements + 3);
+    // Expired caches add hostname and organization status; membership was
+    // already read on every warm request.
+    expect(expired.roundTrips).toBe(warm.roundTrips + 1);
+    expect(expired.statements).toBe(warm.statements + 2);
     // A fresh isolate also follows the app's version once (app-activation.ts),
     // a read that runs after the response in production (waitUntil).
     expect(fresh.roundTrips).toBe(expired.roundTrips + 1);

@@ -13,8 +13,15 @@ export const userAppsCollection = lazyInitForWorkers(() =>
   createCollection(
     queryCollectionOptions({
       queryKey: ["user-apps"],
+      meta: { persist: false },
       queryFn: async () => {
         const result = await getMyApps();
+        // Existing route refreshes of this collection must also refresh the
+        // identity-scoped authorization query used by the launcher.
+        void queryClient.invalidateQueries({
+          queryKey: ["user-apps"],
+          predicate: (query) => query.queryKey.length > 1,
+        });
         return result.apps;
       },
       queryClient,

@@ -35,8 +35,9 @@ function ExternalLinksAdmin() {
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
+  const [confirmedHostname, setConfirmedHostname] = useState("");
   const [busy, setBusy] = useState(false);
-  const [everyone, setEveryone] = useState(true);
+  const [everyone, setEveryone] = useState<boolean | null>(null);
   const [userIds, setUserIds] = useState<string[]>([]);
   const [groupIds, setGroupIds] = useState<string[]>([]);
   const {
@@ -59,7 +60,8 @@ function ExternalLinksAdmin() {
     setEditing(null);
     setName("");
     setUrl("");
-    setEveryone(true);
+    setConfirmedHostname("");
+    setEveryone(null);
     setUserIds([]);
     setGroupIds([]);
   };
@@ -70,6 +72,7 @@ function ExternalLinksAdmin() {
       setEditing(link.id);
       setName(link.name);
       setUrl(link.url);
+      setConfirmedHostname("");
       setEveryone(access.everyone);
       setUserIds(access.userIds);
       setGroupIds(access.groupIds);
@@ -85,6 +88,22 @@ function ExternalLinksAdmin() {
     queryClient.invalidateQueries({ queryKey: ["external-links", orgId] });
   const save = async (event: FormEvent) => {
     event.preventDefault();
+    if (everyone === null) {
+      toast.error("Choose who can see this link before publishing");
+      return;
+    }
+    if (editing) {
+      let host = "";
+      try {
+        host = new URL(url).hostname.toLowerCase().replace(/\.$/, "");
+      } catch {
+        /* Server validates URL too. */
+      }
+      if (!host || confirmedHostname.trim().toLowerCase() !== host) {
+        toast.error("Re-enter the destination hostname to confirm");
+        return;
+      }
+    }
     if (!everyone && !choices) {
       toast.error("Load members and groups before saving access");
       return;
@@ -97,7 +116,9 @@ function ExternalLinksAdmin() {
         groupIds: everyone ? [] : groupIds,
       };
       if (editing)
-        await updateExternalLink({ data: { id: editing, name, url, access } });
+        await updateExternalLink({
+          data: { id: editing, name, url, access, confirmedHostname },
+        });
       else await createExternalLink({ data: { name, url, access } });
       clear();
       await refresh();
@@ -156,21 +177,37 @@ function ExternalLinksAdmin() {
             onChange={(event) => setUrl(event.target.value)}
           />
         </label>
+        {editing ? (
+          <label className="space-y-1 text-sm">
+            Re-enter destination hostname to confirm (not the full URL)
+            <Input
+              required
+              autoComplete="off"
+              value={confirmedHostname}
+              onChange={(event) => setConfirmedHostname(event.target.value)}
+            />
+          </label>
+        ) : null}
+        {everyone === null ? (
+          <p className="w-full text-sm">
+            Choose an audience before publishing this link.
+          </p>
+        ) : null}
         <Button
           type="button"
-          variant={everyone ? "default" : "outline"}
+          variant={everyone === true ? "default" : "outline"}
           onClick={() => setEveryone(true)}
         >
           Everyone
         </Button>
         <Button
           type="button"
-          variant={everyone ? "outline" : "default"}
+          variant={everyone === false ? "default" : "outline"}
           onClick={() => setEveryone(false)}
         >
           Selected members and groups
         </Button>
-        {!everyone ? (
+        {everyone === false ? (
           <div className="w-full space-y-2" aria-label="External link access">
             {choicesError ? (
               <p role="alert">
@@ -219,7 +256,10 @@ function ExternalLinksAdmin() {
             ) : null}
           </div>
         ) : null}
-        <Button type="submit" disabled={busy || (!everyone && !choices)}>
+        <Button
+          type="submit"
+          disabled={busy || (everyone === false && !choices)}
+        >
           {editing ? "Save changes" : "Add link"}
         </Button>
         {editing ? (

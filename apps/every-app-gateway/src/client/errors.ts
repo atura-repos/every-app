@@ -51,6 +51,8 @@ const SERVER_ERROR_MESSAGES: Record<PublicErrorCode, string> = {
     "Reset link has expired. Please request a new password reset.",
   PASSWORD_RESET_REQUIRES_ACTIVE_USER:
     "Password reset is only available for active users.",
+  PORTAL_PREFERENCES_CONFLICT:
+    "Your layout changed in another browser. Reload or reapply your change.",
   APP_NOT_FOUND: "App not found.",
   APP_ID_ALREADY_EXISTS: "An app with this ID already exists.",
   TOKEN_NOT_FOUND: "Token not found.",

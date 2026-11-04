@@ -5,7 +5,7 @@ import {
   personalLinkFormSchema,
   personalLinkUpdateSchema,
   personalLinkDeleteSchema,
-  portalPreferencesSchema,
+  portalPreferencesSaveSchema,
   portalPreferencesImportSchema,
 } from "@/schemas/personalPortal";
 import { PersonalPortalService as service } from "@/server/services/PersonalPortalService";
@@ -32,7 +32,7 @@ export const getPortalPreferences = createServerFn()
   .handler(async ({ context }) => service.getPreferences(context.org));
 export const savePortalPreferences = createServerFn({ method: "POST" })
   .middleware([publicErrorMiddleware, organizationMemberMiddleware])
-  .validator((data: unknown) => portalPreferencesSchema.parse(data))
+  .validator((data: unknown) => portalPreferencesSaveSchema.parse(data))
   .handler(async ({ context, data }) =>
     service.savePreferences(context.org, data),
   );

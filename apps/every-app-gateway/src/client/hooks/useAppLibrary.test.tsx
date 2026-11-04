@@ -9,6 +9,10 @@ import { AppLibraryLayout, useAppLibrary } from "./useAppLibrary";
 
 const state = vi.hoisted(() => ({
   account: { user: "alice", org: "one" },
+  validated: true,
+  fetching: false,
+  sessionError: null as Error | null,
+  appsFetch: vi.fn(),
   save: vi.fn(),
   get: vi.fn(),
   apps: [
@@ -23,8 +27,12 @@ vi.mock("@/client/hooks/useSession", () => ({
       user: { id: state.account.user },
       session: { activeOrganizationId: state.account.org },
     },
+    isFetchedAfterMount: state.validated,
+    isFetching: state.fetching,
+    error: state.sessionError,
   }),
 }));
+vi.mock("@/serverFunctions/apps", () => ({ getMyApps: state.appsFetch }));
 vi.mock("@/client/tanstack-db", () => ({
   userAppsCollection: { utils: { refetch: vi.fn() } },
   useQueryFailed: () => false,
@@ -77,6 +85,12 @@ function deferred() {
 ).IS_REACT_ACT_ENVIRONMENT = true;
 beforeEach(async () => {
   state.account = { user: "alice", org: "one" };
+  state.validated = true;
+  state.fetching = false;
+  state.sessionError = null;
+  state.appsFetch
+    .mockReset()
+    .mockImplementation(async () => ({ apps: state.apps }));
   state.apps = [
     { id: "a", name: "Alpha", tier: "app" },
     { id: "b", name: "Beta", tier: "app" },
@@ -97,14 +111,83 @@ beforeEach(async () => {
   document.body.appendChild(container);
   root = createRoot(container);
   render();
-  await act(async () => {
-    await Promise.resolve();
+  await vi.waitFor(async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(library.isLoading).toBe(false);
+    expect(library.apps.map((app) => app.name)).toContain("Alpha");
   });
 });
 afterEach(() => {
   act(() => root.unmount());
   client.clear();
   container.remove();
+});
+
+it("never persists preferences or managed apps in a browser snapshot", async () => {
+  const { dehydrate } = await import("@tanstack/react-query");
+  const snapshot = dehydrate(client, {
+    shouldDehydrateQuery: (q) =>
+      q.state.status === "success" && q.meta?.persist !== false,
+  });
+  expect(JSON.stringify(snapshot)).not.toContain("Alpha");
+  expect(JSON.stringify(snapshot)).not.toContain("pinnedIds");
+});
+
+it("rejects restored managed apps and preferences on offline reload", async () => {
+  client.setQueryData(
+    ["user-apps", "alice", "one"],
+    [{ id: "secret", name: "Old secret app", tier: "app" }],
+  );
+  state.appsFetch.mockRejectedValue(new Error("offline"));
+  state.get.mockRejectedValue(new Error("offline"));
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["user-apps"] });
+    await client.invalidateQueries({ queryKey: ["portal-preferences"] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(library.apps).toEqual([]);
+  expect(library.pinnedIds.size).toBe(0);
+  expect(library.isError).toBe(true);
+});
+
+it("hides managed apps and preferences during session validation or failed access refetch", async () => {
+  expect(library.apps.map((app) => app.name)).toContain("Alpha");
+  state.fetching = true;
+  render();
+  expect(library.apps).toEqual([]);
+  expect(library.pinnedIds.size).toBe(0);
+  state.fetching = false;
+  state.appsFetch.mockRejectedValue(new Error("revoked"));
+  render();
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["user-apps"] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(state.appsFetch).toHaveBeenCalled();
+  expect(library.apps).toEqual([]);
+  expect(library.isError).toBe(true);
+});
+
+it("does not show old workspace apps while new workspace access is checked", async () => {
+  state.account.org = "two";
+  state.validated = false;
+  render();
+  expect(library.apps).toEqual([]);
+  expect(library.pinnedIds.size).toBe(0);
+  state.validated = true;
+  state.appsFetch.mockResolvedValueOnce({
+    apps: [{ id: "z", name: "Zeta", tier: "app" }],
+  });
+  render();
+  await vi.waitFor(async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(library.apps.map((app) => app.name)).toEqual(["Zeta"]);
+  });
+  expect(library.apps.map((app) => app.name)).toEqual(["Zeta"]);
 });
 
 it("moves a pinned app across the pin boundary without a no-op", async () => {
@@ -121,7 +204,12 @@ it("moves a pinned app across the pin boundary without a no-op", async () => {
   expect(library.pinnedIds.has("b")).toBe(true);
   expect(library.pinnedIds.has("a")).toBe(false);
   expect(state.save).toHaveBeenCalledWith({
-    data: { pinnedIds: ["b"], orderedIds: ["b", "a", "c"], layout: "grid" },
+    data: {
+      pinnedIds: ["b"],
+      orderedIds: ["b", "a", "c"],
+      layout: "grid",
+      expectedRevision: 0,
+    },
   });
 });
 
@@ -145,7 +233,12 @@ it("moves to the next visible page app instead of swapping an MCP app", async ()
     { id: "b", name: "Beta", tier: "provider" },
     { id: "c", name: "Charlie", tier: "app" },
   ];
+  state.appsFetch.mockResolvedValue({ apps: state.apps });
   render();
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["user-apps"] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
   act(() => library.moveApp("a", 1));
   expect(client.getQueryData(["portal-preferences", "alice", "one"])).toEqual({
     pinnedIds: ["c"],
@@ -245,6 +338,74 @@ it("keeps the old legacy copy and new account cache when an import finishes afte
   if (storage) Object.defineProperty(window, "localStorage", storage);
 });
 
+it("shows a two-browser conflict, keeps the confirmed save, and explicitly reloads/reapplies", async () => {
+  state.save.mockResolvedValueOnce({ ...initial, layout: "list", revision: 1 });
+  act(() => library.setLayout(AppLibraryLayout.List));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(
+    client.getQueryData<PortalPreferences>([
+      "portal-preferences",
+      "alice",
+      "one",
+    ]),
+  )?.toMatchObject({ layout: "list", revision: 1 });
+  state.save.mockRejectedValueOnce({ code: "PORTAL_PREFERENCES_CONFLICT" });
+  act(() => library.togglePin("b"));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(library.conflict).toBe(true);
+  expect(
+    client.getQueryData<PortalPreferences>([
+      "portal-preferences",
+      "alice",
+      "one",
+    ]),
+  )?.toMatchObject({ layout: "list", pinnedIds: ["a"], revision: 1 });
+  state.get.mockResolvedValueOnce({ ...initial, layout: "grid", revision: 2 });
+  state.save.mockResolvedValueOnce({
+    ...initial,
+    pinnedIds: ["a", "b"],
+    revision: 3,
+  });
+  await act(async () => {
+    await library.reapplyConflict();
+  });
+  expect(state.save).toHaveBeenLastCalledWith({
+    data: expect.objectContaining({
+      expectedRevision: 2,
+      pinnedIds: ["a", "b"],
+    }),
+  });
+  expect(library.conflict).toBe(false);
+});
+
+it("loads latest preferences on conflict without re-sending the rejected draft", async () => {
+  state.save.mockRejectedValueOnce({ code: "PORTAL_PREFERENCES_CONFLICT" });
+  act(() => library.setLayout(AppLibraryLayout.List));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(library.conflict).toBe(true);
+  state.get.mockResolvedValueOnce({
+    ...initial,
+    pinnedIds: ["c"],
+    revision: 2,
+  });
+  await act(async () => {
+    await library.reloadConflict();
+  });
+  expect(library.conflict).toBe(false);
+  expect(state.save).toHaveBeenCalledTimes(1);
+  expect(client.getQueryData(["portal-preferences", "alice", "one"])).toEqual({
+    ...initial,
+    pinnedIds: ["c"],
+    revision: 2,
+  });
+});
+
 it("coalesces rapid layout and pin changes while a save is in flight", async () => {
   const first = deferred();
   state.save.mockReturnValueOnce(first.promise);
@@ -269,7 +430,12 @@ it("coalesces rapid layout and pin changes while a save is in flight", async () 
   });
   expect(state.save).toHaveBeenCalledTimes(2);
   expect(state.save).toHaveBeenLastCalledWith({
-    data: { ...initial, pinnedIds: ["a", "b"], layout: "list" },
+    data: {
+      ...initial,
+      pinnedIds: ["a", "b"],
+      layout: "list",
+      expectedRevision: 1,
+    },
   });
 });
 
@@ -341,7 +507,7 @@ it("does not send queued old-account edits or mutate a new account after switchi
   state.account = { user: "bob", org: "two" };
   render();
   await act(async () => {
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
   act(() => library.togglePin("c"));
   expect(state.save).toHaveBeenCalledTimes(2);
@@ -353,5 +519,6 @@ it("does not send queued old-account edits or mutate a new account after switchi
   expect(client.getQueryData(["portal-preferences", "bob", "two"])).toEqual({
     ...newAccount,
     pinnedIds: ["c"],
+    revision: 1,
   });
 });
