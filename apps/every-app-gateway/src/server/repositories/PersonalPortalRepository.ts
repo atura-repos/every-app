@@ -7,6 +7,8 @@ export type PortalPreferences = {
   orderedIds: string[];
   layout: "grid" | "list";
   revision?: number;
+  collections?: { id: string; name: string }[];
+  assignments?: Record<string, string>;
 };
 
 class PortalPreferencesConflict extends Error {
@@ -85,6 +87,8 @@ export const PersonalPortalRepository = {
           orderedIds: row.orderedIds,
           layout: row.layout,
           revision: row.revision,
+          collections: row.collections,
+          assignments: row.assignments,
         }
       : undefined;
   },
@@ -98,6 +102,12 @@ export const PersonalPortalRepository = {
       pinnedIds: data.pinnedIds,
       orderedIds: data.orderedIds,
       layout: data.layout,
+      ...(data.collections !== undefined
+        ? { collections: data.collections }
+        : {}),
+      ...(data.assignments !== undefined
+        ? { assignments: data.assignments }
+        : {}),
     };
     let row;
     if (expectedRevision === 0) {
@@ -120,7 +130,12 @@ export const PersonalPortalRepository = {
       .returning()
       .get();
     if (!row) throw new PortalPreferencesConflict();
-    return { ...values, revision: row.revision };
+    return {
+      ...values,
+      collections: row.collections,
+      assignments: row.assignments,
+      revision: row.revision,
+    };
   },
   // Import only if no server preference exists: a stale browser cannot roll back another device.
   importPreferences: (

@@ -124,6 +124,47 @@ afterEach(() => {
   container.remove();
 });
 
+it("recognizes typed managed pins in the existing sidebar library", async () => {
+  state.get.mockResolvedValue({
+    pinnedIds: ["managed:b"],
+    orderedIds: ["managed:b", "managed:a"],
+    layout: "grid",
+    revision: 1,
+  });
+  await act(async () => {
+    await client.invalidateQueries({
+      queryKey: ["portal-preferences", "alice", "one"],
+    });
+  });
+  await vi.waitFor(() =>
+    expect(library.pinnedApps.map((app) => app.id)).toEqual(["b"]),
+  );
+  expect(library.apps[0]?.id).toBe("b");
+});
+
+it("saves a collection with the same revision-safe queue as pinning", async () => {
+  const collection = {
+    id: "11111111-1111-4111-8111-111111111111",
+    name: "Daily",
+  };
+  act(() =>
+    library.updateLauncher((current) => ({
+      ...current,
+      collections: [collection],
+      assignments: { "managed:a": collection.id },
+    })),
+  );
+  await vi.waitFor(() =>
+    expect(state.save).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        collections: [collection],
+        assignments: { "managed:a": collection.id },
+        expectedRevision: 0,
+      }),
+    }),
+  );
+});
+
 it("never persists preferences or managed apps in a browser snapshot", async () => {
   const { dehydrate } = await import("@tanstack/react-query");
   const snapshot = dehydrate(client, {

@@ -8,10 +8,12 @@ const state = vi.hoisted(() => ({
   apps: [] as UserAccessApp[],
   loading: false,
   error: false,
+  personalError: false,
+  externalError: false,
   userId: "alice",
   orgId: "one",
-  personalLinks: [] as { name: string; url: string }[],
-  externalLinks: [] as { name: string; url: string }[],
+  personalLinks: [] as { id: string; name: string; url: string }[],
+  externalLinks: [] as { id: string; name: string; url: string }[],
 }));
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => ({
@@ -43,7 +45,14 @@ vi.mock("@/client/hooks/useAppLibrary", () => ({
     isError: state.error,
     pinnedIds: new Set(),
     layout: "grid",
-    togglePin: vi.fn(),
+    preferences: {
+      pinnedIds: [],
+      orderedIds: [],
+      layout: "grid",
+      collections: [],
+      assignments: {},
+    },
+    updateLauncher: vi.fn(),
     setLayout: vi.fn(),
     moveApp: vi.fn(),
     conflict: false,
@@ -54,14 +63,14 @@ vi.mock("@/client/hooks/useAppLibrary", () => ({
 vi.mock("@/client/hooks/usePersonalLinks", () => ({
   usePersonalLinks: () => ({
     data: state.personalLinks,
-    isError: false,
+    isError: state.personalError,
     refetch: vi.fn(),
   }),
 }));
 vi.mock("@/client/hooks/useExternalLinks", () => ({
   useExternalLinks: () => ({
     data: state.externalLinks,
-    isError: false,
+    isError: state.externalError,
     refetch: vi.fn(),
   }),
 }));
@@ -178,6 +187,8 @@ beforeEach(() => {
   state.apps = [app];
   state.loading = false;
   state.error = false;
+  state.personalError = false;
+  state.externalError = false;
   state.userId = "alice";
   state.orgId = "one";
   state.personalLinks = [];
@@ -251,20 +262,33 @@ it("does not reopen the old selection after an account switch, even when the new
   expect(container.querySelector('[role="dialog"]')).toBeNull();
 });
 
+it("hides every previously authorized card when one source fails rather than showing stale data", async () => {
+  state.personalLinks = [
+    { id: "p", name: "Private notes", url: "https://example.org/" },
+  ];
+  await render();
+  expect(container.textContent).toContain("Private notes");
+  state.externalError = true;
+  await render();
+  expect(container.textContent).not.toContain("Private notes");
+  expect(container.textContent).not.toContain("Use Search MCP");
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+    "List incomplete",
+  );
+});
+
 it("searches link names but not private or organization link URLs", async () => {
   state.apps = [
     { ...app, tier: "app", name: "Dashboard", description: "Reports" },
   ];
   state.personalLinks = [
-    { name: "Private portal", url: "https://secret.example/internal" },
+    { id: "p", name: "Private portal", url: "https://secret.example/internal" },
   ];
   state.externalLinks = [
-    { name: "Team portal", url: "https://secret.example/team" },
+    { id: "e", name: "Team portal", url: "https://secret.example/team" },
   ];
   await render();
-  const input = container.querySelector(
-    'input[aria-label="Search your apps"]',
-  )!;
+  const input = container.querySelector('input[type="search"]')!;
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,

@@ -5,6 +5,7 @@ import {
   text,
   integer,
 } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 import { organizations, users } from "./auth.schema";
 
 /** Personal bookmarks never confer access to their destinations. */
@@ -41,6 +42,14 @@ export const portalPreferences = sqliteTable(
       .notNull(),
     layout: text("layout", { enum: ["grid", "list"] }).notNull(),
     revision: integer("revision").notNull().default(0),
+    collections: text("collections", { mode: "json" })
+      .$type<{ id: string; name: string }[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    assignments: text("assignments", { mode: "json" })
+      .$type<Record<string, string>>()
+      .notNull()
+      .default(sql`'{}'`),
   },
   (t) => [primaryKey({ columns: [t.organizationId, t.userId] })],
 );

@@ -79,10 +79,61 @@ describe("personal portal in migrated SQLite", () => {
     });
     expect(await repo.getPreferences(a, alice)).toEqual({
       ...prefs,
+      collections: [],
+      assignments: {},
       revision: 1,
     });
     expect(await repo.getPreferences(a, bob)).toBeUndefined();
     expect(await repo.getPreferences(b, alice)).toBeUndefined();
+  });
+  it("persists collections with CAS and keeps an older client from erasing them", async () => {
+    const collection = {
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "Daily",
+    };
+    await repo.savePreferences(
+      a,
+      alice,
+      {
+        pinnedIds: [],
+        orderedIds: [],
+        layout: "grid",
+        collections: [collection],
+        assignments: { "personal:item": collection.id },
+      },
+      0,
+    );
+    expect(await repo.getPreferences(a, alice)).toMatchObject({
+      collections: [collection],
+      assignments: { "personal:item": collection.id },
+      revision: 1,
+    });
+    await repo.savePreferences(
+      a,
+      alice,
+      { pinnedIds: [], orderedIds: [], layout: "list" },
+      1,
+    );
+    expect(await repo.getPreferences(a, alice)).toMatchObject({
+      collections: [collection],
+      assignments: { "personal:item": collection.id },
+      layout: "list",
+      revision: 2,
+    });
+    await expect(
+      repo.savePreferences(
+        a,
+        alice,
+        {
+          pinnedIds: [],
+          orderedIds: [],
+          layout: "grid",
+          collections: [],
+          assignments: {},
+        },
+        1,
+      ),
+    ).rejects.toMatchObject({ code: "PORTAL_PREFERENCES_CONFLICT" });
   });
   it("atomically refuses stale revisions and competing first writes", async () => {
     const first = {
@@ -92,6 +143,8 @@ describe("personal portal in migrated SQLite", () => {
     };
     expect(await repo.savePreferences(a, alice, first, 0)).toEqual({
       ...first,
+      collections: [],
+      assignments: {},
       revision: 1,
     });
     await expect(
@@ -99,11 +152,15 @@ describe("personal portal in migrated SQLite", () => {
     ).rejects.toMatchObject({ code: "PORTAL_PREFERENCES_CONFLICT" });
     expect(await repo.getPreferences(a, alice)).toEqual({
       ...first,
+      collections: [],
+      assignments: {},
       revision: 1,
     });
     const second = { ...first, pinnedIds: ["new"] };
     expect(await repo.savePreferences(a, alice, second, 1)).toEqual({
       ...second,
+      collections: [],
+      assignments: {},
       revision: 2,
     });
     await expect(
@@ -111,6 +168,8 @@ describe("personal portal in migrated SQLite", () => {
     ).rejects.toMatchObject({ code: "PORTAL_PREFERENCES_CONFLICT" });
     expect(await repo.getPreferences(a, alice)).toEqual({
       ...second,
+      collections: [],
+      assignments: {},
       revision: 2,
     });
     expect(await repo.savePreferences(a, bob, first, 0)).toMatchObject({
@@ -150,6 +209,70 @@ describe("personal portal in migrated SQLite", () => {
         )
       ).revision,
     ).toBe(1);
+  });
+  it("rejects a revoked saved assignment until reset removes the inert key", async () => {
+    const ctx = { orgId: a, userId: alice, role: "member" as const };
+    const own = await PersonalPortalService.createLink(ctx, {
+      name: "Old",
+      url: "https://example.org/",
+    });
+    const collection = {
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "Daily",
+    };
+    const key = `personal:${own.id}`;
+    await PersonalPortalService.savePreferences(ctx, {
+      pinnedIds: [key],
+      orderedIds: [key],
+      layout: "grid",
+      expectedRevision: 0,
+      collections: [collection],
+      assignments: { [key]: collection.id },
+    });
+    await PersonalPortalService.deleteLink(ctx, own.id);
+    await expect(
+      PersonalPortalService.savePreferences(ctx, {
+        pinnedIds: [key],
+        orderedIds: [key],
+        layout: "list",
+        expectedRevision: 1,
+        collections: [collection],
+        assignments: { [key]: collection.id },
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(
+      PersonalPortalService.savePreferences(ctx, {
+        pinnedIds: [],
+        orderedIds: [],
+        layout: "grid",
+        expectedRevision: 1,
+        collections: [],
+        assignments: {},
+      }),
+    ).resolves.toMatchObject({ revision: 2 });
+  });
+  it("rejects a collection assignment to a foreign personal link", async () => {
+    const foreign = await PersonalPortalService.createLink(
+      { orgId: a, userId: bob, role: "member" },
+      { name: "Foreign", url: "https://example.org/" },
+    );
+    await expect(
+      PersonalPortalService.savePreferences(
+        { orgId: a, userId: alice, role: "member" },
+        {
+          pinnedIds: [],
+          orderedIds: [],
+          layout: "grid",
+          expectedRevision: 0,
+          collections: [
+            { id: "11111111-1111-4111-8111-111111111111", name: "Daily" },
+          ],
+          assignments: {
+            [`personal:${foreign.id}`]: "11111111-1111-4111-8111-111111111111",
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
   });
   it("rejects absent, foreign and revoked typed keys but preserves existing raw legacy ids", async () => {
     const ctx = { orgId: a, userId: alice, role: "member" as const };
@@ -379,14 +502,40 @@ describe("personal portal in migrated SQLite", () => {
         "utf8",
       );
       await old.execute(migration);
+      await old.execute(
+        readFileSync(
+          new URL(
+            "../../../drizzle/0027_portal_collections.sql",
+            import.meta.url,
+          ),
+          "utf8",
+        )
+          .split("--> statement-breakpoint")
+          .map((s) => s.trim())
+          .filter(Boolean)[0],
+      );
+      await old.execute(
+        readFileSync(
+          new URL(
+            "../../../drizzle/0027_portal_collections.sql",
+            import.meta.url,
+          ),
+          "utf8",
+        )
+          .split("--> statement-breakpoint")
+          .map((s) => s.trim())
+          .filter(Boolean)[1],
+      );
       const result = await old.execute(
-        "SELECT pinned_ids, ordered_ids, layout, revision FROM portal_preferences",
+        "SELECT pinned_ids, ordered_ids, layout, revision, collections, assignments FROM portal_preferences",
       );
       expect(result.rows[0]).toMatchObject({
         pinned_ids: '["old","unavailable"]',
         ordered_ids: '["unavailable","old"]',
         layout: "list",
         revision: 0,
+        collections: "[]",
+        assignments: "{}",
       });
     } finally {
       old.close();

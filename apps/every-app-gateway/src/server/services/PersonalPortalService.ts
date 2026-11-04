@@ -24,7 +24,11 @@ async function validateKeys(
   previous?: Preferences,
   allowLegacyImport = false,
 ) {
-  const ids = new Set([...data.pinnedIds, ...data.orderedIds]);
+  const ids = new Set([
+    ...data.pinnedIds,
+    ...data.orderedIds,
+    ...Object.keys(data.assignments ?? {}),
+  ]);
   if (!ids.size) return;
   const [managed, shared, external, personal] = await Promise.all([
     AppAccessRepository.findAllByUserId(ctx.userId, ctx.orgId),
@@ -86,6 +90,18 @@ export const PersonalPortalService = {
   savePreferences: async (ctx: OrgContext, data: SavePreferences) => {
     const current = await repo.getPreferences(ctx.orgId, ctx.userId);
     await validateKeys(ctx, data, current);
+    if (
+      data.collections &&
+      data.assignments === undefined &&
+      current?.assignments &&
+      Object.values(current.assignments).some(
+        (id) => !data.collections!.some((c) => c.id === id),
+      )
+    )
+      throw new PublicError(
+        "INVALID_INPUT",
+        "Collection assignments must be updated together",
+      );
     return repo.savePreferences(
       ctx.orgId,
       ctx.userId,
