@@ -210,17 +210,22 @@ describe("personal portal in migrated SQLite", () => {
       ).revision,
     ).toBe(1);
   });
-  it("rejects a revoked saved assignment until reset removes the inert key", async () => {
+  it("preserves inert revoked keys while editing another authorized item", async () => {
     const ctx = { orgId: a, userId: alice, role: "member" as const };
-    const own = await PersonalPortalService.createLink(ctx, {
+    const old = await PersonalPortalService.createLink(ctx, {
       name: "Old",
+      url: "https://example.org/",
+    });
+    const live = await PersonalPortalService.createLink(ctx, {
+      name: "Live",
       url: "https://example.org/",
     });
     const collection = {
       id: "11111111-1111-4111-8111-111111111111",
       name: "Daily",
     };
-    const key = `personal:${own.id}`;
+    const key = `personal:${old.id}`;
+    const liveKey = `personal:${live.id}`;
     await PersonalPortalService.savePreferences(ctx, {
       pinnedIds: [key],
       orderedIds: [key],
@@ -229,27 +234,49 @@ describe("personal portal in migrated SQLite", () => {
       collections: [collection],
       assignments: { [key]: collection.id },
     });
-    await PersonalPortalService.deleteLink(ctx, own.id);
+    await PersonalPortalService.deleteLink(ctx, old.id);
+    const saved = await PersonalPortalService.savePreferences(ctx, {
+      pinnedIds: [key, liveKey],
+      orderedIds: [key, liveKey],
+      layout: "list",
+      expectedRevision: 1,
+      collections: [collection],
+      assignments: { [key]: collection.id, [liveKey]: collection.id },
+    });
+    expect(saved).toMatchObject({
+      pinnedIds: [key, liveKey],
+      orderedIds: [key, liveKey],
+      layout: "list",
+      assignments: { [key]: collection.id, [liveKey]: collection.id },
+      revision: 2,
+    });
     await expect(
       PersonalPortalService.savePreferences(ctx, {
-        pinnedIds: [key],
-        orderedIds: [key],
-        layout: "list",
-        expectedRevision: 1,
-        collections: [collection],
-        assignments: { [key]: collection.id },
+        ...saved,
+        pinnedIds: [key, liveKey],
+        orderedIds: [key, liveKey],
+        assignments: { [key]: collection.id, [liveKey]: collection.id },
+        expectedRevision: 2,
+      }),
+    ).resolves.toMatchObject({ revision: 3 });
+    await expect(
+      PersonalPortalService.savePreferences(ctx, {
+        ...saved,
+        pinnedIds: [liveKey],
+        orderedIds: [liveKey],
+        assignments: { [liveKey]: collection.id },
+        expectedRevision: 3,
+      }),
+    ).resolves.toMatchObject({ revision: 4 });
+    await expect(
+      PersonalPortalService.savePreferences(ctx, {
+        ...saved,
+        pinnedIds: [key, liveKey],
+        orderedIds: [liveKey],
+        assignments: { [liveKey]: collection.id },
+        expectedRevision: 4,
       }),
     ).rejects.toMatchObject({ code: "INVALID_INPUT" });
-    await expect(
-      PersonalPortalService.savePreferences(ctx, {
-        pinnedIds: [],
-        orderedIds: [],
-        layout: "grid",
-        expectedRevision: 1,
-        collections: [],
-        assignments: {},
-      }),
-    ).resolves.toMatchObject({ revision: 2 });
   });
   it("rejects a collection assignment to a foreign personal link", async () => {
     const foreign = await PersonalPortalService.createLink(
@@ -375,7 +402,7 @@ describe("personal portal in migrated SQLite", () => {
         ...data,
         expectedRevision: 1,
       }),
-    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    ).resolves.toMatchObject({ revision: 2 });
   });
   it("only accepts external keys while the member actually sees their workspace link", async () => {
     const ctx = { orgId: a, userId: alice, role: "member" as const };
@@ -415,7 +442,7 @@ describe("personal portal in migrated SQLite", () => {
         ...data,
         expectedRevision: 1,
       }),
-    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    ).resolves.toMatchObject({ revision: 2 });
     const foreign = await ExternalLinkService.create(
       {
         orgId: b,
@@ -435,7 +462,7 @@ describe("personal portal in migrated SQLite", () => {
       PersonalPortalService.savePreferences(ctx, {
         ...data,
         pinnedIds: [`external:${foreign.id}`],
-        expectedRevision: 1,
+        expectedRevision: 2,
       }),
     ).rejects.toMatchObject({ code: "INVALID_INPUT" });
   });

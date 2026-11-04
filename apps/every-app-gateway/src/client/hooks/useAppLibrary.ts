@@ -117,6 +117,10 @@ export function useAppLibrary() {
   const key = ["portal-preferences", userId, orgId];
   const client = useQueryClient();
   const [conflictAccount, setConflictAccount] = useState("");
+  const [saveState, setSaveState] = useState<{
+    account: string;
+    status: "saving" | "saved" | "error" | "conflict";
+  } | null>(null);
   const conflictDraft = useRef<PreferenceOperation[] | null>(null);
   const identity =
     userId && orgId ? ["portal-preferences", userId, orgId] : null;
@@ -278,6 +282,7 @@ export function useAppLibrary() {
     if (!queue.running) queue.confirmed = current;
     const next = change(current);
     if (next === current) return;
+    setSaveState({ account, status: "saving" });
     queue.operations.push(preferenceOperation(current, next, swap?.current));
     // An older read must not overwrite an optimistic edit while it saves.
     void client.cancelQueries({ queryKey: identity, exact: true });
@@ -310,19 +315,24 @@ export function useAppLibrary() {
             !queue.pending &&
             saves.current === queue &&
             currentAccount.current === account
-          )
+          ) {
             client.setQueryData(identity, queue.confirmed);
+            setSaveState({ account, status: "saved" });
+          }
         } catch (error) {
           if (getErrorCode(error) === "PORTAL_PREFERENCES_CONFLICT") {
             if (saves.current === queue && currentAccount.current === account) {
               conflictDraft.current = [...queue.operations];
               setConflictAccount(account);
+              setSaveState({ account, status: "conflict" });
             }
             queue.operations = [];
             queue.pending = null;
           } else {
             queue.operations.splice(0, sentOperations);
             toast.error("Could not save your app preferences.");
+            if (saves.current === queue && currentAccount.current === account)
+              setSaveState({ account, status: "error" });
           }
           if (
             queue.confirmed &&
@@ -371,12 +381,15 @@ export function useAppLibrary() {
       if (currentAccount.current !== account || saves.current !== queue) return;
       conflictDraft.current = null;
       setConflictAccount("");
+      setSaveState(reapply ? { account, status: "saved" } : null);
     } catch (error) {
       if (getErrorCode(error) !== "PORTAL_PREFERENCES_CONFLICT")
         toast.error("Could not reload your app preferences.");
     }
   };
   return {
+    saveStatus:
+      saveState?.account === account ? saveState.status : ("" as const),
     conflict: conflictAccount === account && conflictDraft.current !== null,
     reloadConflict: () => resolveConflict(false),
     reapplyConflict: () => resolveConflict(true),

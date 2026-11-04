@@ -124,6 +124,26 @@ afterEach(() => {
   container.remove();
 });
 
+it("reports pending then confirmed, rejected, and conflicting saves from the real queue", async () => {
+  let finish!: (value: unknown) => void;
+  state.save.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  act(() => library.updateLauncher((p) => ({ ...p, layout: "list" })));
+  expect(library.saveStatus).toBe("saving");
+  await act(async () => finish({ revision: 1 }));
+  await vi.waitFor(() => expect(library.saveStatus).toBe("saved"));
+  state.save.mockRejectedValueOnce(new Error("save failed"));
+  act(() => library.updateLauncher((p) => ({ ...p, layout: "grid" })));
+  await vi.waitFor(() => expect(library.saveStatus).toBe("error"));
+  state.save.mockRejectedValueOnce({ code: "PORTAL_PREFERENCES_CONFLICT" });
+  act(() => library.updateLauncher((p) => ({ ...p, layout: "grid" })));
+  await vi.waitFor(() => expect(library.saveStatus).toBe("conflict"));
+});
+
 it("recognizes typed managed pins in the existing sidebar library", async () => {
   state.get.mockResolvedValue({
     pinnedIds: ["managed:b"],

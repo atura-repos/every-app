@@ -53,6 +53,19 @@ async function validateKeys(
   );
   for (const id of ids) {
     if (allowed.has(id)) continue;
+    // Saved revoked keys remain inert: only newly introduced references need
+    // live access. Do not allow an old pin to become a new assignment/order.
+    if (
+      previous &&
+      (!data.pinnedIds.includes(id) || previous.pinnedIds.includes(id)) &&
+      (!data.orderedIds.includes(id) || previous.orderedIds.includes(id)) &&
+      (!(id in (data.assignments ?? {})) ||
+        previous.assignments?.[id] === data.assignments?.[id]) &&
+      (previous.pinnedIds.includes(id) ||
+        previous.orderedIds.includes(id) ||
+        id in (previous.assignments ?? {}))
+    )
+      continue;
     // A pre-existing raw managed preference remains inert when access is gone.
     if (
       !id.includes(":") &&

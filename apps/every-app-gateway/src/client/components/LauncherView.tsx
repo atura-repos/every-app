@@ -26,6 +26,7 @@ type Props = {
   personalLinks?: LinkRow[];
   preferences: PortalPreferences;
   layout: AppLibraryLayout;
+  saveStatus?: "" | "saving" | "saved" | "error" | "conflict";
   onUpdate: (fn: (current: PortalPreferences) => PortalPreferences) => void;
   onOpenSetup: (app: UserAccessApp) => void;
   onUseMcp: (app: UserAccessApp) => void;
@@ -37,6 +38,7 @@ export function LauncherView({
   personalLinks = [],
   preferences,
   layout,
+  saveStatus = "",
   onUpdate,
   onOpenSetup,
   onUseMcp,
@@ -44,7 +46,7 @@ export function LauncherView({
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "pinned" | LauncherKind>("all");
   const [name, setName] = useState("");
-  const [status, setStatus] = useState("");
+
   const sources: LauncherSource[] = [
     ...apps.map((app) => ({
       kind: "managed" as const,
@@ -78,11 +80,8 @@ export function LauncherView({
   );
   const update = (
     fn: (p: PortalPreferences) => PortalPreferences,
-    message: string,
-  ) => {
-    onUpdate(fn);
-    setStatus(`Saving layout… ${message} requested`);
-  };
+    _message: string,
+  ) => onUpdate(fn);
   const toggle = (item: LauncherItem) =>
     update(
       (current) => {
@@ -250,6 +249,14 @@ export function LauncherView({
           className="mt-1 w-full rounded border bg-card p-2"
         />
       </label>
+      <button
+        type="button"
+        onClick={() => setSearch("")}
+        disabled={!search}
+        className="rounded border px-2 py-1.5 text-sm"
+      >
+        Clear search
+      </button>
       <div aria-label="Item filters" className="flex flex-wrap gap-2">
         {(
           [
@@ -270,10 +277,23 @@ export function LauncherView({
             {label}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setFilter("all")}
+          disabled={filter === "all"}
+          className="rounded border px-2 py-1.5 text-sm"
+        >
+          Clear filters
+        </button>
       </div>
       <p role="status">
         {projected.count} {search || filter !== "all" ? "results" : "items"}
-        {status ? ` · ${status}` : ""}
+        {saveStatus === "saving" ? " · Saving layout…" : ""}
+        {saveStatus === "saved" ? " · Layout saved" : ""}
+        {saveStatus === "conflict"
+          ? " · Layout changed in another browser"
+          : ""}
+        {saveStatus === "error" ? " · Could not save layout" : ""}
       </p>
       {projected.count === 0 && (
         <p>{search || filter !== "all" ? "No results" : "No items yet"}</p>

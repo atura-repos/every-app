@@ -58,6 +58,7 @@ function App() {
     preferences,
     layout,
     updateLauncher,
+    saveStatus,
     conflict,
     reloadConflict,
     reapplyConflict,
@@ -211,6 +212,7 @@ function App() {
             externalLinks={externalLinks ?? []}
             preferences={preferences}
             layout={layout}
+            saveStatus={saveStatus}
             onUpdate={updateLauncher}
             onOpenSetup={openSetup}
             onUseMcp={setMcpApp}
