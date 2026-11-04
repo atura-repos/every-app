@@ -105,6 +105,15 @@ async function mount() {
     ),
   );
 }
+async function changeInput(input: HTMLInputElement, value: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )!.set!.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
 async function submit(name: string, url: string) {
   const inputs = container.querySelectorAll("input");
   await act(async () => {
@@ -127,6 +136,116 @@ async function submit(name: string, url: string) {
   });
 }
 describe("admin external links", () => {
+  it.each([
+    ["workspace", "orgId", "org-b"],
+    ["user in the same workspace", "userId", "user-b"],
+  ] as const)(
+    "resets the entire draft when switching %s",
+    async (_label, field, value) => {
+      await mount();
+      await changeInput(
+        container.querySelectorAll("input")[0]!,
+        "Secret draft",
+      );
+      await changeInput(
+        container.querySelectorAll("input")[1]!,
+        "https://private.example/path",
+      );
+      await act(async () => {
+        Array.from(container.querySelectorAll("button"))
+          .find(
+            (button) => button.textContent === "Selected members and groups",
+          )!
+          .click();
+      });
+      await act(async () => {
+        (
+          container.querySelector('input[type="checkbox"]') as HTMLInputElement
+        ).click();
+      });
+      mocks.session[field] = value;
+      await mount();
+      expect(
+        (container.querySelectorAll("input")[0] as HTMLInputElement).value,
+      ).toBe("");
+      expect(
+        (container.querySelectorAll("input")[1] as HTMLInputElement).value,
+      ).toBe("");
+      expect(container.textContent).toContain(
+        "Choose an audience before publishing",
+      );
+      expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+      await submit("Fresh", "https://example.org/");
+      expect(mocks.create).not.toHaveBeenCalled();
+    },
+  );
+  it("ignores an access response from the previous identity and keeps the new draft", async () => {
+    const id = "b500803e-444f-4000-8000-000000000000";
+    mocks.links = [
+      {
+        id,
+        organizationId: "org-a",
+        name: "Old link",
+        url: "https://old.example/",
+        everyone: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ];
+    let resolveAccess!: (value: {
+      everyone: boolean;
+      userIds: string[];
+      groupIds: string[];
+    }) => void;
+    mocks.access.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveAccess = resolve;
+        }),
+    );
+    await mount();
+    await act(async () => {
+      Array.from(container.querySelectorAll("button"))
+        .find((button) => button.textContent === "Edit")!
+        .click();
+    });
+    mocks.session.orgId = "org-b";
+    mocks.links = [];
+    await mount();
+    await changeInput(container.querySelectorAll("input")[0]!, "New draft");
+    await act(async () =>
+      resolveAccess({
+        everyone: false,
+        userIds: ["user-a"],
+        groupIds: ["grp_a"],
+      }),
+    );
+    expect(
+      (container.querySelectorAll("input")[0] as HTMLInputElement).value,
+    ).toBe("New draft");
+    expect(container.querySelector("form")?.getAttribute("aria-label")).toBe(
+      "Add external link",
+    );
+    expect(container.textContent).toContain(
+      "Choose an audience before publishing",
+    );
+  });
+  it("drops a draft while the session is being revalidated", async () => {
+    await mount();
+    await changeInput(
+      container.querySelectorAll("input")[0]!,
+      "Prior user draft",
+    );
+    mocks.session.fetching = true;
+    await mount();
+    expect(container.textContent).not.toContain("Prior user draft");
+    mocks.session.userId = "user-b";
+    mocks.session.fetching = false;
+    await mount();
+    expect(
+      (container.querySelectorAll("input")[0] as HTMLInputElement).value,
+    ).toBe("");
+  });
   it("never persists member names and emails in the query snapshot", async () => {
     await mount();
     const snapshot = dehydrate(client, {
@@ -147,16 +266,17 @@ describe("admin external links", () => {
     mocks.session.validated = false;
     mocks.options.mockRejectedValue(new Error("offline"));
     await mount();
-    await act(async () => {
-      Array.from(container.querySelectorAll("button"))
-        .find((button) => button.textContent === "Selected members and groups")!
-        .click();
-    });
+    expect(container.querySelector("form")).toBeNull();
     expect(container.textContent).not.toContain("former@example.org");
     expect(mocks.options).not.toHaveBeenCalled();
 
     mocks.session.validated = true;
     await mount();
+    await act(async () => {
+      Array.from(container.querySelectorAll("button"))
+        .find((button) => button.textContent === "Selected members and groups")!
+        .click();
+    });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
@@ -195,6 +315,11 @@ describe("admin external links", () => {
     );
     await mount();
     expect(container.textContent).not.toContain("ana@example.org");
+    await act(async () => {
+      Array.from(container.querySelectorAll("button"))
+        .find((button) => button.textContent === "Selected members and groups")!
+        .click();
+    });
     expect(
       container
         .querySelector('button[type="submit"]')

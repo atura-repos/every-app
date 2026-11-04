@@ -27,6 +27,64 @@ export enum AppLibraryLayout {
   List = "list",
 }
 
+type PreferenceOperation = {
+  layout?: PortalPreferences["layout"];
+  pins: { id: string; pinned: boolean }[];
+  swap?: [movedId: string, neighborId: string, direction: -1 | 1];
+};
+
+function preferenceOperation(
+  before: PortalPreferences,
+  after: PortalPreferences,
+  swap?: PreferenceOperation["swap"],
+): PreferenceOperation {
+  return {
+    ...(before.layout !== after.layout ? { layout: after.layout } : {}),
+    pins: [...new Set([...before.pinnedIds, ...after.pinnedIds])]
+      .filter(
+        (id) => before.pinnedIds.includes(id) !== after.pinnedIds.includes(id),
+      )
+      .map((id) => ({ id, pinned: after.pinnedIds.includes(id) })),
+    ...(swap ? { swap } : {}),
+  };
+}
+
+function replayOperations(
+  latest: PortalPreferences,
+  operations: PreferenceOperation[],
+): PortalPreferences {
+  return operations.reduce((current, operation) => {
+    const pinnedIds = [...current.pinnedIds];
+    for (const pin of operation.pins) {
+      const index = pinnedIds.indexOf(pin.id);
+      if (pin.pinned && index < 0) pinnedIds.push(pin.id);
+      if (!pin.pinned && index >= 0) pinnedIds.splice(index, 1);
+    }
+    const orderedIds = [...current.orderedIds];
+    if (operation.swap) {
+      const [movedId, neighborId, direction] = operation.swap;
+      const a = orderedIds.indexOf(movedId);
+      const b = orderedIds.indexOf(neighborId);
+      if (a >= 0 && b >= 0)
+        [orderedIds[a], orderedIds[b]] = [orderedIds[b], orderedIds[a]];
+      else if (b >= 0)
+        orderedIds.splice(b + (direction === 1 ? 1 : 0), 0, movedId);
+      else if (a >= 0)
+        orderedIds.splice(a + (direction === 1 ? 0 : 1), 0, neighborId);
+      else
+        orderedIds.push(
+          ...(direction === 1 ? [neighborId, movedId] : [movedId, neighborId]),
+        );
+    }
+    return {
+      ...current,
+      pinnedIds,
+      orderedIds,
+      layout: operation.layout ?? current.layout,
+    };
+  }, latest);
+}
+
 /** Preferences are read and written for the authenticated account on the server. */
 export function useAppLibrary() {
   const session = useSession();
@@ -37,7 +95,7 @@ export function useAppLibrary() {
   const key = ["portal-preferences", userId, orgId];
   const client = useQueryClient();
   const [conflictAccount, setConflictAccount] = useState("");
-  const conflictDraft = useRef<PortalPreferences | null>(null);
+  const conflictDraft = useRef<PreferenceOperation[] | null>(null);
   const identity =
     userId && orgId ? ["portal-preferences", userId, orgId] : null;
   const account = identity?.join(":") ?? "";
@@ -50,12 +108,14 @@ export function useAppLibrary() {
     pending: PortalPreferences | null;
     running: boolean;
     confirmed: PortalPreferences | null;
+    operations: PreferenceOperation[];
   }>({
     account: "",
     identity: null,
     pending: null,
     running: false,
     confirmed: null,
+    operations: [],
   });
   if (saves.current.account !== account) {
     // Discard speculative old-account edits; only the in-flight write may land.
@@ -64,6 +124,7 @@ export function useAppLibrary() {
       client.setQueryData(previous.identity, previous.confirmed);
     }
     previous.pending = null;
+    previous.operations = [];
     conflictDraft.current = null;
     saves.current = {
       account,
@@ -71,6 +132,7 @@ export function useAppLibrary() {
       pending: null,
       running: false,
       confirmed: null,
+      operations: [],
     };
   }
   const preferencesQuery = useQuery({
@@ -164,10 +226,11 @@ export function useAppLibrary() {
 
   const update = (
     change: (current: PortalPreferences) => PortalPreferences,
+    swap?: { current?: PreferenceOperation["swap"] },
   ) => {
     if (
       !identity ||
-      conflictAccount === account ||
+      (conflictAccount === account && conflictDraft.current !== null) ||
       !authorized ||
       !validated ||
       preferencesQuery.isFetching ||
@@ -182,6 +245,7 @@ export function useAppLibrary() {
     if (!queue.running) queue.confirmed = current;
     const next = change(current);
     if (next === current) return;
+    queue.operations.push(preferenceOperation(current, next, swap?.current));
     // An older read must not overwrite an optimistic edit while it saves.
     void client.cancelQueries({ queryKey: identity, exact: true });
     client.setQueryData(identity, next);
@@ -191,6 +255,7 @@ export function useAppLibrary() {
     void (async () => {
       while (queue.pending && saves.current === queue) {
         const value = queue.pending;
+        const sentOperations = queue.operations.length;
         queue.pending = null;
         try {
           const saved = await savePortalPreferences({
@@ -205,17 +270,30 @@ export function useAppLibrary() {
             ...value,
             revision: saved?.revision ?? (queue.confirmed?.revision ?? 0) + 1,
           };
-          if (!queue.pending && currentAccount.current === account)
+          queue.operations.splice(0, sentOperations);
+          if (
+            !queue.pending &&
+            saves.current === queue &&
+            currentAccount.current === account
+          )
             client.setQueryData(identity, queue.confirmed);
         } catch (error) {
           if (getErrorCode(error) === "PORTAL_PREFERENCES_CONFLICT") {
-            conflictDraft.current = queue.pending ?? value;
+            if (saves.current === queue && currentAccount.current === account) {
+              conflictDraft.current = [...queue.operations];
+              setConflictAccount(account);
+            }
+            queue.operations = [];
             queue.pending = null;
-            if (currentAccount.current === account) setConflictAccount(account);
           } else {
+            queue.operations.splice(0, sentOperations);
             toast.error("Could not save your app preferences.");
           }
-          if (queue.confirmed && currentAccount.current === account) {
+          if (
+            queue.confirmed &&
+            saves.current === queue &&
+            currentAccount.current === account
+          ) {
             client.setQueryData(identity, queue.confirmed);
           }
         }
@@ -224,26 +302,36 @@ export function useAppLibrary() {
     })();
   };
   const resolveConflict = async (reapply: boolean) => {
-    if (!identity || conflictAccount !== account) return;
+    if (!identity || conflictAccount !== account || !conflictDraft.current)
+      return;
     const draft = conflictDraft.current;
+    const queue = saves.current;
     try {
       const latest = await getPortalPreferences();
-      if (currentAccount.current !== account || !latest) return;
-      saves.current.confirmed = latest;
+      if (
+        currentAccount.current !== account ||
+        saves.current !== queue ||
+        !latest
+      )
+        return;
+      queue.confirmed = latest;
       client.setQueryData(identity, latest);
-      if (reapply && draft) {
+      if (reapply && draft?.length) {
+        const merged = replayOperations(latest, draft);
         const saved = await savePortalPreferences({
           data: {
-            pinnedIds: draft.pinnedIds,
-            orderedIds: draft.orderedIds,
-            layout: draft.layout,
+            pinnedIds: merged.pinnedIds,
+            orderedIds: merged.orderedIds,
+            layout: merged.layout,
             expectedRevision: latest.revision ?? 0,
           },
         });
-        if (currentAccount.current !== account) return;
+        if (currentAccount.current !== account || saves.current !== queue)
+          return;
         client.setQueryData(identity, saved);
-        saves.current.confirmed = saved;
+        queue.confirmed = saved;
       }
+      if (currentAccount.current !== account || saves.current !== queue) return;
       conflictDraft.current = null;
       setConflictAccount("");
     } catch (error) {
@@ -252,7 +340,7 @@ export function useAppLibrary() {
     }
   };
   return {
-    conflict: conflictAccount === account,
+    conflict: conflictAccount === account && conflictDraft.current !== null,
     reloadConflict: () => resolveConflict(false),
     reapplyConflict: () => resolveConflict(true),
     apps,
@@ -273,6 +361,7 @@ export function useAppLibrary() {
       }));
     },
     moveApp: (appId: string, direction: -1 | 1) => {
+      const swap: { current?: PreferenceOperation["swap"] } = {};
       update((current) => {
         const ordered = orderAuthorizedApps([...apps], current);
         const app = ordered.find((candidate) => candidate.id === appId);
@@ -283,6 +372,7 @@ export function useAppLibrary() {
         const index = section.findIndex((candidate) => candidate.id === appId);
         const neighbor = section[index + direction]?.id;
         if (index < 0 || !neighbor) return current;
+        swap.current = [appId, neighbor, direction];
         const otherSection = ordered.filter(
           (candidate) => isMcpApp(candidate) !== isMcpApp(app),
         );
@@ -303,7 +393,7 @@ export function useAppLibrary() {
           }
         }
         return { ...current, pinnedIds: [...pinned], orderedIds: ids };
-      });
+      }, swap);
     },
   };
 }

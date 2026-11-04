@@ -405,6 +405,325 @@ it("loads latest preferences on conflict without re-sending the rejected draft",
   });
 });
 
+it.each([
+  ["layout", "pin"],
+  ["pin", "layout"],
+] as const)(
+  "reapplies %s without overwriting a concurrent %s edit",
+  async (local, remote) => {
+    state.save.mockRejectedValueOnce({ code: "PORTAL_PREFERENCES_CONFLICT" });
+    act(() =>
+      local === "layout"
+        ? library.setLayout(AppLibraryLayout.List)
+        : library.togglePin("b"),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(library.conflict).toBe(true);
+    const latest = {
+      ...initial,
+      revision: 2,
+      ...(remote === "pin" ? { pinnedIds: ["a", "c"] } : { layout: "list" }),
+    };
+    state.get.mockResolvedValueOnce(latest);
+    state.save.mockImplementationOnce(
+      async ({ data }: { data: PortalPreferences }) => ({
+        ...data,
+        revision: 3,
+      }),
+    );
+    await act(async () => {
+      await library.reapplyConflict();
+    });
+    expect(state.save).toHaveBeenLastCalledWith({
+      data: {
+        pinnedIds: local === "pin" ? ["a", "b"] : ["a", "c"],
+        orderedIds: initial.orderedIds,
+        layout: "list",
+        expectedRevision: 2,
+      },
+    });
+    expect(library.conflict).toBe(false);
+  },
+);
+
+it("replays a stale reorder as a swap, preserving concurrent order and layout", async () => {
+  state.save.mockRejectedValueOnce({ code: "PORTAL_PREFERENCES_CONFLICT" });
+  act(() => library.moveApp("a", 1));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(library.conflict).toBe(true);
+  state.get.mockResolvedValueOnce({
+    ...initial,
+    orderedIds: ["a", "c", "b"],
+    layout: "list",
+    revision: 4,
+  });
+  state.save.mockImplementationOnce(
+    async ({ data }: { data: PortalPreferences }) => ({ ...data, revision: 5 }),
+  );
+  await act(async () => {
+    await library.reapplyConflict();
+  });
+  expect(state.save).toHaveBeenLastCalledWith({
+    data: {
+      pinnedIds: ["b"],
+      orderedIds: ["b", "c", "a"],
+      layout: "list",
+      expectedRevision: 4,
+    },
+  });
+});
+
+it("reapplies the first move from empty order without losing remote layout or order", async () => {
+  act(() => {
+    client.setQueryData(["portal-preferences", "alice", "one"], {
+      pinnedIds: [],
+      orderedIds: [],
+      layout: "grid",
+    });
+  });
+  render();
+  state.save.mockRejectedValueOnce({ code: "PORTAL_PREFERENCES_CONFLICT" });
+  act(() => library.moveApp("a", 1));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(library.conflict).toBe(true);
+  state.get.mockResolvedValueOnce({
+    pinnedIds: [],
+    orderedIds: ["a", "c", "b"],
+    layout: "list",
+    revision: 2,
+  });
+  state.save.mockImplementationOnce(
+    async ({ data }: { data: PortalPreferences }) => ({ ...data, revision: 3 }),
+  );
+  await act(async () => {
+    await library.reapplyConflict();
+  });
+  expect(state.save).toHaveBeenLastCalledWith({
+    data: {
+      pinnedIds: [],
+      orderedIds: ["b", "c", "a"],
+      layout: "list",
+      expectedRevision: 2,
+    },
+  });
+  expect(library.conflict).toBe(false);
+});
+
+it.each([
+  { name: "only the moved app", remote: ["a", "b"], expected: ["a", "c", "b"] },
+  { name: "only its neighbor", remote: ["a", "c"], expected: ["a", "c", "b"] },
+  { name: "neither app", remote: ["a"], expected: ["a", "c", "b"] },
+])(
+  "reapplies a partial-order move when remote contains $name",
+  async ({ remote, expected }) => {
+    act(() => {
+      client.setQueryData(["portal-preferences", "alice", "one"], {
+        pinnedIds: [],
+        orderedIds: ["a"],
+        layout: "grid",
+      });
+    });
+    state.save.mockRejectedValueOnce({ code: "PORTAL_PREFERENCES_CONFLICT" });
+    act(() => library.moveApp("b", 1));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(library.conflict).toBe(true);
+    state.get.mockResolvedValueOnce({
+      pinnedIds: ["a"],
+      orderedIds: remote,
+      layout: "list",
+      revision: 2,
+    });
+    state.save.mockImplementationOnce(
+      async ({ data }: { data: PortalPreferences }) => ({
+        ...data,
+        revision: 3,
+      }),
+    );
+    await act(async () => {
+      await library.reapplyConflict();
+    });
+    expect(state.save).toHaveBeenLastCalledWith({
+      data: {
+        pinnedIds: ["a"],
+        orderedIds: expected,
+        layout: "list",
+        expectedRevision: 2,
+      },
+    });
+    expect(library.conflict).toBe(false);
+  },
+);
+
+it("retains first-move intent through repeated conflicts and a newly added remote app", async () => {
+  act(() => {
+    client.setQueryData(["portal-preferences", "alice", "one"], {
+      pinnedIds: [],
+      orderedIds: [],
+      layout: "grid",
+    });
+  });
+  state.save.mockRejectedValueOnce({ code: "PORTAL_PREFERENCES_CONFLICT" });
+  act(() => library.moveApp("b", -1));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(library.conflict).toBe(true);
+  state.get.mockResolvedValueOnce({
+    pinnedIds: ["c"],
+    orderedIds: ["c", "a"],
+    layout: "list",
+    revision: 2,
+  });
+  state.save.mockRejectedValueOnce({ code: "PORTAL_PREFERENCES_CONFLICT" });
+  await act(async () => {
+    await library.reapplyConflict();
+  });
+  expect(state.save).toHaveBeenLastCalledWith({
+    data: {
+      pinnedIds: ["c"],
+      orderedIds: ["c", "b", "a"],
+      layout: "list",
+      expectedRevision: 2,
+    },
+  });
+  expect(library.conflict).toBe(true);
+  state.get.mockResolvedValueOnce({
+    pinnedIds: ["c"],
+    orderedIds: ["c", "d", "a"],
+    layout: "list",
+    revision: 3,
+  });
+  state.save.mockImplementationOnce(
+    async ({ data }: { data: PortalPreferences }) => ({ ...data, revision: 4 }),
+  );
+  await act(async () => {
+    await library.reapplyConflict();
+  });
+  expect(state.save).toHaveBeenLastCalledWith({
+    data: {
+      pinnedIds: ["c"],
+      orderedIds: ["c", "d", "b", "a"],
+      layout: "list",
+      expectedRevision: 3,
+    },
+  });
+  expect(library.conflict).toBe(false);
+});
+
+it("keeps the intended operation and visible conflict after a second CAS rejection", async () => {
+  state.save.mockRejectedValueOnce({ code: "PORTAL_PREFERENCES_CONFLICT" });
+  act(() => library.togglePin("b"));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(library.conflict).toBe(true);
+  const latest = { ...initial, pinnedIds: ["a", "c"], revision: 2 };
+  state.get.mockResolvedValueOnce(latest);
+  state.save.mockRejectedValueOnce({ code: "PORTAL_PREFERENCES_CONFLICT" });
+  await act(async () => {
+    await library.reapplyConflict();
+  });
+  expect(library.conflict).toBe(true);
+  expect(client.getQueryData(["portal-preferences", "alice", "one"])).toEqual(
+    latest,
+  );
+  state.get.mockResolvedValueOnce({ ...latest, layout: "list", revision: 3 });
+  state.save.mockImplementationOnce(
+    async ({ data }: { data: PortalPreferences }) => ({ ...data, revision: 4 }),
+  );
+  await act(async () => {
+    await library.reapplyConflict();
+  });
+  expect(state.save).toHaveBeenLastCalledWith({
+    data: {
+      pinnedIds: ["a", "c", "b"],
+      orderedIds: initial.orderedIds,
+      layout: "list",
+      expectedRevision: 3,
+    },
+  });
+  expect(library.conflict).toBe(false);
+});
+
+it("reapplies both in-flight and queued edits after a conflict without losing remote pins", async () => {
+  const first = deferred();
+  state.save.mockReturnValueOnce(
+    first.promise.then(() => {
+      throw { code: "PORTAL_PREFERENCES_CONFLICT" };
+    }),
+  );
+  act(() => {
+    library.setLayout(AppLibraryLayout.List);
+    library.togglePin("b");
+  });
+  await act(async () => {
+    first.resolve();
+    await first.promise;
+  });
+  expect(library.conflict).toBe(true);
+  state.get.mockResolvedValueOnce({
+    ...initial,
+    pinnedIds: ["a", "c"],
+    revision: 2,
+  });
+  state.save.mockImplementationOnce(
+    async ({ data }: { data: PortalPreferences }) => ({ ...data, revision: 3 }),
+  );
+  await act(async () => {
+    await library.reapplyConflict();
+  });
+  expect(state.save).toHaveBeenLastCalledWith({
+    data: {
+      pinnedIds: ["a", "c", "b"],
+      orderedIds: initial.orderedIds,
+      layout: "list",
+      expectedRevision: 2,
+    },
+  });
+});
+
+it("does not reapply an old account conflict after switching away and back during reload", async () => {
+  state.save.mockRejectedValueOnce({ code: "PORTAL_PREFERENCES_CONFLICT" });
+  act(() => library.togglePin("b"));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(library.conflict).toBe(true);
+  let finish!: (value: PortalPreferences) => void;
+  state.get.mockReturnValueOnce(
+    new Promise<PortalPreferences>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  let reapply!: Promise<void>;
+  act(() => {
+    reapply = library.reapplyConflict();
+  });
+  state.account = { user: "bob", org: "two" };
+  client.setQueryData(["portal-preferences", "bob", "two"], {
+    pinnedIds: [],
+    orderedIds: [],
+    layout: "grid",
+  });
+  render();
+  state.account = { user: "alice", org: "one" };
+  render();
+  await act(async () => {
+    finish({ ...initial, revision: 2 });
+    await reapply;
+  });
+  expect(state.save).toHaveBeenCalledTimes(1);
+  expect(library.conflict).toBe(false);
+});
+
 it("coalesces rapid layout and pin changes while a save is in flight", async () => {
   const first = deferred();
   state.save.mockReturnValueOnce(first.promise);

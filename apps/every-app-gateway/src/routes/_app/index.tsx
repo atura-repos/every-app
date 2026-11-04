@@ -108,6 +108,15 @@ function App() {
     reloadConflict,
     reapplyConflict,
   } = useAppLibrary();
+  // The selection is only an id; metadata and authorization must come from
+  // the currently validated library, never the object saved when it opened.
+  const selectedMcpApp =
+    !isLoading && !isError && mcpApp
+      ? apps.find((app) => app.id === mcpApp.id && isMcpApp(app))
+      : undefined;
+  useEffect(() => {
+    if (mcpApp && !selectedMcpApp) setMcpApp(null);
+  }, [mcpApp, selectedMcpApp]);
   const {
     data: personalLinks,
     isError: personalLinksError,
@@ -424,7 +433,7 @@ function App() {
           <LauncherPersonalLinks
             key={`${session.data?.user.id}:${session.data?.session.activeOrganizationId}`}
             links={personalLinks.filter((link) =>
-              `${link.name} ${link.url}`.toLocaleLowerCase().includes(query),
+              link.name.toLocaleLowerCase().includes(query),
             )}
           />
         ) : null}
@@ -438,7 +447,7 @@ function App() {
         {externalLinks ? (
           <ExternalLinkList
             links={externalLinks.filter((link) =>
-              `${link.name} ${link.url}`.toLocaleLowerCase().includes(query),
+              link.name.toLocaleLowerCase().includes(query),
             )}
           />
         ) : null}
@@ -480,10 +489,10 @@ function App() {
           onClose={closeSetup}
         />
       ) : null}
-      {mcpApp ? (
+      {selectedMcpApp ? (
         <McpAppDialog
-          name={mcpApp.name}
-          appId={mcpApp.appId}
+          name={selectedMcpApp.name}
+          appId={selectedMcpApp.appId}
           onClose={() => setMcpApp(null)}
         />
       ) : null}

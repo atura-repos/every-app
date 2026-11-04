@@ -24,12 +24,31 @@ function ExternalLinksAdmin() {
   const {
     data: session,
     isFetchedAfterMount,
-    isFetching: sessionFetching,
-    error: sessionError,
+    isFetching,
+    error,
   } = useSession();
   const orgId = session?.session.activeOrganizationId;
   const userId = session?.user.id;
-  const validated = isFetchedAfterMount && !sessionFetching && !sessionError;
+  // Unmount the draft during revalidation and key it to both identity dimensions.
+  // An access request started by the old form cannot update the new form.
+  if (!isFetchedAfterMount || isFetching || error || !orgId || !userId)
+    return <p>Loading external links…</p>;
+  return (
+    <ExternalLinksDraft
+      key={JSON.stringify([orgId, userId])}
+      orgId={orgId}
+      userId={userId}
+    />
+  );
+}
+
+function ExternalLinksDraft({
+  orgId,
+  userId,
+}: {
+  orgId: string;
+  userId: string;
+}) {
   const { data: links, isPending, isError, refetch } = useExternalLinks();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<string | null>(null);
@@ -48,12 +67,11 @@ function ExternalLinksAdmin() {
     refetch: retryChoices,
   } = useQuery({
     queryKey: ["external-link-access-options", orgId, userId],
-    enabled: Boolean(orgId && userId && validated),
     meta: { persist: false },
     queryFn: () => externalLinkAccessOptions(),
   });
   const choices =
-    validated && choicesFetchedAfterMount && !choicesFetching && !choicesError
+    choicesFetchedAfterMount && !choicesFetching && !choicesError
       ? cachedChoices
       : undefined;
   const clear = () => {
