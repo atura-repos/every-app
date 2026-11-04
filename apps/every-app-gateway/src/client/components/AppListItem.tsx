@@ -4,7 +4,6 @@ import { AppIcon } from "@/client/components/AppIcon";
 import { Badge } from "@/client/components/ui/badge";
 import { Button, buttonVariants } from "@/client/components/ui/button";
 import { Card } from "@/client/components/ui/card";
-import { Skeleton } from "@/client/components/ui/skeleton";
 import {
   Tooltip,
   TooltipContent,
@@ -296,40 +295,6 @@ export function AppListItem({
             className={cn(overlayClass, "cursor-pointer")}
           />
         ) : null}
-      </Card>
-    </li>
-  );
-}
-
-export function AppListItemSkeleton({ layout }: { layout: AppLibraryLayout }) {
-  const list = layout === AppLibraryLayout.List;
-  return (
-    <li>
-      <Card
-        className={cn(
-          "flex-row items-center gap-4 p-5 md:flex-col md:items-stretch",
-          cardHeightClass(list),
-          list && "md:flex-row md:items-center md:gap-3 md:px-4 md:py-2",
-        )}
-      >
-        <Skeleton
-          className={cn(
-            "size-12 shrink-0 rounded-xl md:size-10 md:rounded-lg",
-            list && "md:size-8",
-          )}
-        />
-        <div
-          className={cn(
-            "flex-1 space-y-3",
-            list && "md:flex md:min-w-0 md:items-center md:gap-3 md:space-y-0",
-          )}
-        >
-          <Skeleton className="h-4 w-28" />
-          <Skeleton className="h-3 w-3/4" />
-        </div>
-        <Skeleton
-          className={cn("hidden h-3 w-16 md:block", list && "md:ml-auto")}
-        />
       </Card>
     </li>
   );

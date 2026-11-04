@@ -11,7 +11,7 @@ export type LauncherSource = {
 export type LauncherItem = LauncherSource & {
   key: `${LauncherKind}:${string}`;
 };
-export type LauncherSection = {
+type LauncherSection = {
   id: string;
   name: string;
   items: LauncherItem[];
