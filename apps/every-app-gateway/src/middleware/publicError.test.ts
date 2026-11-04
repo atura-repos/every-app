@@ -48,26 +48,37 @@ async function thrownBy(next: () => Promise<unknown>): Promise<Error> {
 }
 
 describe("publicErrorMiddleware", () => {
-  it("hides an unexpected error and logs only its name, message and stack", async () => {
+  it("does not log or send a private URL in an unexpected exception", async () => {
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
-    // Like Better Auth's APIError: response headers ride on the error.
-    const thrown = Object.assign(new Error("boom"), {
+    const privateUrl =
+      "https://private.example.test/path?account=synthetic-private-query";
+    const thrown = Object.assign(new Error(`fetch failed: ${privateUrl}`), {
+      stack: `Error: fetch failed: ${privateUrl}\n at ${privateUrl}`,
       headers: { "set-cookie": "session=secret-session-token" },
       body: { token: "reset-token-123" },
     });
 
-    await expect(
-      handler({ next: () => Promise.reject(thrown) }),
-    ).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
-
-    const output = consoleError.mock.calls.flat().map(String).join("\n");
-    expect(output).toContain("server_fn.unhandled_error");
-    expect(output).toContain("boom");
-    expect(output).not.toContain("secret-session-token");
-    expect(output).not.toContain("reset-token-123");
-    consoleError.mockRestore();
+    try {
+      const sent = await thrownBy(() => Promise.reject(thrown));
+      expect(sent).toMatchObject({ code: "INTERNAL_ERROR" });
+      const output = consoleError.mock.calls.flat().map(String).join("\n");
+      const responseBody = await wire(sent);
+      expect(output).toContain("server_fn.unhandled_error");
+      expect(output).toMatch(/requestId|correlationId/);
+      for (const unsafe of [
+        privateUrl,
+        "synthetic-private-query",
+        "secret-session-token",
+        "reset-token-123",
+      ]) {
+        expect(output).not.toContain(unsafe);
+        expect(responseBody).not.toContain(unsafe);
+      }
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("puts only the code, message and name of every error it lets out on the wire", async () => {
