@@ -137,3 +137,109 @@ it("announces confirmed save, conflict and failure without a permanent requested
   );
   act(() => root.unmount());
 });
+
+it("offers keyboard-operable grid/list controls and restores a saved legacy list on remount", () => {
+  const container = document.createElement("div");
+  let root = createRoot(container);
+  let saved = {
+    pinnedIds: ["a"],
+    orderedIds: ["a"],
+    layout: "list" as "grid" | "list",
+    revision: 3,
+  };
+  const props = {
+    apps: [{ id: "a", name: "Editor", description: "Workspace" }],
+    onUpdate: (change: (current: typeof saved) => typeof saved) => {
+      saved = change(saved);
+      root.render(
+        <LauncherView
+          {...({ ...props, preferences: saved, layout: saved.layout } as any)}
+        />,
+      );
+    },
+    onOpenSetup: vi.fn(),
+    onUseMcp: vi.fn(),
+  };
+  act(() =>
+    root.render(
+      <LauncherView
+        {...({ ...props, preferences: saved, layout: saved.layout } as any)}
+      />,
+    ),
+  );
+  const button = (name: string) =>
+    [...container.querySelectorAll("button")].find(
+      (b) => b.textContent?.trim() === name,
+    )!;
+  expect(button("List view").getAttribute("aria-pressed")).toBe("true");
+  expect(
+    container.querySelector('section[aria-label="Pinned"] ul')?.className,
+  ).not.toContain("md:grid-cols-2");
+  act(() => {
+    button("Grid view").focus();
+    button("Grid view").click();
+  });
+  expect(saved).toMatchObject({
+    layout: "grid",
+    revision: 3,
+    pinnedIds: ["a"],
+  });
+  expect(button("Grid view").getAttribute("aria-pressed")).toBe("true");
+  expect(
+    container.querySelector('section[aria-label="Pinned"] ul')?.className,
+  ).toContain("md:grid-cols-2");
+  act(() => root.unmount());
+  root = createRoot(container);
+  act(() =>
+    root.render(
+      <LauncherView
+        {...({ ...props, preferences: saved, layout: saved.layout } as any)}
+      />,
+    ),
+  );
+  expect(button("Grid view").getAttribute("aria-pressed")).toBe("true");
+  act(() => button("List view").click());
+  expect(saved.layout).toBe("list");
+  act(() => root.unmount());
+});
+
+it("focuses launcher search with Cmd/Ctrl+K and releases the shortcut on unmount", () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  act(() =>
+    root.render(
+      <LauncherView
+        {...({
+          apps: [],
+          preferences: { pinnedIds: [], orderedIds: [], layout: "grid" },
+          layout: "grid",
+          onUpdate: vi.fn(),
+          onOpenSetup: vi.fn(),
+          onUseMcp: vi.fn(),
+        } as any)}
+      />,
+    ),
+  );
+  const search = container.querySelector('input[type="search"]')!;
+  for (const modifier of ["metaKey", "ctrlKey"] as const) {
+    const event = new KeyboardEvent("keydown", {
+      key: "k",
+      [modifier]: true,
+      cancelable: true,
+      bubbles: true,
+    });
+    act(() => window.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(search);
+  }
+  act(() => root.unmount());
+  const event = new KeyboardEvent("keydown", {
+    key: "k",
+    ctrlKey: true,
+    cancelable: true,
+  });
+  window.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(false);
+  container.remove();
+});

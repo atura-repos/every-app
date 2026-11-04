@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Bookmark, Link2, Pin, PinOff, ArrowUpRight } from "lucide-react";
 import { AppListItem } from "./AppListItem";
@@ -44,8 +44,20 @@ export function LauncherView({
   onUseMcp,
 }: Props) {
   const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState<"all" | "pinned" | LauncherKind>("all");
   const [name, setName] = useState("");
+
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", focusSearch);
+    return () => window.removeEventListener("keydown", focusSearch);
+  }, []);
 
   const sources: LauncherSource[] = [
     ...apps.map((app) => ({
@@ -243,12 +255,44 @@ export function LauncherView({
       <label className="block max-w-sm text-sm">
         Search name or description{" "}
         <input
+          ref={searchRef}
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setSearch("");
+              searchRef.current?.blur();
+            }
+          }}
           className="mt-1 w-full rounded border bg-card p-2"
         />
       </label>
+      <div
+        role="group"
+        aria-label="App layout"
+        className="flex flex-wrap gap-2"
+      >
+        {([AppLibraryLayout.Grid, AppLibraryLayout.List] as const).map(
+          (view) => (
+            <button
+              key={view}
+              type="button"
+              aria-pressed={layout === view}
+              onClick={() =>
+                onUpdate((current) =>
+                  current.layout === view
+                    ? current
+                    : { ...current, layout: view },
+                )
+              }
+              className="min-h-10 rounded border px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2"
+            >
+              {view === AppLibraryLayout.Grid ? "Grid view" : "List view"}
+            </button>
+          ),
+        )}
+      </div>
       <button
         type="button"
         onClick={() => setSearch("")}
