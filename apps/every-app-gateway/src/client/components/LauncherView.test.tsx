@@ -10,7 +10,7 @@ vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, ...props }: any) => <a href={props.to}>{children}</a>,
 }));
 vi.mock("./AppListItem", () => ({
-  AppListItem: ({ app }: any) => <li>{app.name}</li>,
+  AppListItem: ({ app }: any) => <div>{app.name}</div>,
 }));
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -36,6 +36,7 @@ it("shows a single combined result count and never matches a private URL", () =>
   };
   act(() => root.render(<LauncherView {...(props as any)} />));
   expect(container.textContent).toContain("3 items");
+  expect(container.querySelector("li li")).toBeNull();
   const search = container.querySelector('input[type="search"]')!;
   act(() => {
     Object.getOwnPropertyDescriptor(

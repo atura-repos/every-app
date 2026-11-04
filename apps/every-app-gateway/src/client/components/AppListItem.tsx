@@ -259,7 +259,7 @@ export function AppListItem({
     "absolute inset-0 rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50";
 
   return (
-    <li>
+    <div>
       <Card
         className={cn(
           "group relative gap-0 py-0 transition-colors motion-reduce:transition-none",
@@ -296,6 +296,6 @@ export function AppListItem({
           />
         ) : null}
       </Card>
-    </li>
+    </div>
   );
 }

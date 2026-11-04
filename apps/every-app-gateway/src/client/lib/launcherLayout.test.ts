@@ -32,6 +32,21 @@ describe("launcher presentation operations", () => {
       ).orderedIds,
     ).toEqual(["personal:a", "managed:c", "external:b"]);
   });
+  it("reorders pinned items without changing pin membership or collection assignment", () => {
+    const twoPinned = {
+      ...prefs,
+      pinnedIds: ["personal:a", "external:b"],
+    };
+    const moved = moveLauncherItem(
+      twoPinned,
+      ["personal:a", "external:b", "managed:c"],
+      "personal:a",
+      1,
+      ["personal:a", "external:b"],
+    );
+    expect(moved.pinnedIds).toEqual(["external:b", "personal:a"]);
+    expect(moved.assignments).toEqual(twoPinned.assignments);
+  });
   it("reorders migrated raw managed IDs without creating duplicate positions", () => {
     const legacy = { ...prefs, orderedIds: ["a", "b"], pinnedIds: [] };
     const moved = moveLauncherItem(

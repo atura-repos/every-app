@@ -187,18 +187,16 @@ export function LauncherView({
     if (app)
       return (
         <li key={item.key} className="min-w-0">
-          <ul>
-            <AppListItem
-              app={app}
-              pinned={pinned.has(item.key)}
-              onTogglePin={() => toggle(item)}
-              onMoveUp={() => move(item, -1, section)}
-              onMoveDown={() => move(item, 1, section)}
-              onOpenSetup={() => onOpenSetup(app)}
-              onUseMcp={() => onUseMcp(app)}
-              layout={layout}
-            />
-          </ul>
+          <AppListItem
+            app={app}
+            pinned={pinned.has(item.key)}
+            onTogglePin={() => toggle(item)}
+            onMoveUp={() => move(item, -1, section)}
+            onMoveDown={() => move(item, 1, section)}
+            onOpenSetup={() => onOpenSetup(app)}
+            onUseMcp={() => onUseMcp(app)}
+            layout={layout}
+          />
           {actions}
         </li>
       );

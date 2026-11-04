@@ -30,7 +30,13 @@ export function moveLauncherItem(
   const a = ordered.indexOf(key),
     b = ordered.indexOf(neighbor);
   [ordered[a], ordered[b]] = [ordered[b], ordered[a]];
-  return { ...prefs, orderedIds: ordered };
+  const pinnedIds = [...prefs.pinnedIds];
+  const normalize = (id: string) => (id.includes(":") ? id : `managed:${id}`);
+  const pinA = pinnedIds.findIndex((id) => normalize(id) === key);
+  const pinB = pinnedIds.findIndex((id) => normalize(id) === neighbor);
+  if (pinA !== -1 && pinB !== -1)
+    [pinnedIds[pinA], pinnedIds[pinB]] = [pinnedIds[pinB], pinnedIds[pinA]];
+  return { ...prefs, pinnedIds, orderedIds: ordered };
 }
 export function removeCollection(
   prefs: PortalPreferences,

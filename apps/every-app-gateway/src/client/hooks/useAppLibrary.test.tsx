@@ -165,6 +165,51 @@ it("saves a collection with the same revision-safe queue as pinning", async () =
   );
 });
 
+it("reapplies a launcher pin-order move after a two-browser conflict", async () => {
+  const pins = ["managed:a", "managed:b"];
+  act(() =>
+    client.setQueryData(["portal-preferences", "alice", "one"], {
+      pinnedIds: pins,
+      orderedIds: pins,
+      layout: "grid",
+      revision: 1,
+    }),
+  );
+  render();
+  state.save.mockRejectedValueOnce({ code: "PORTAL_PREFERENCES_CONFLICT" });
+  act(() =>
+    library.updateLauncher((current) => ({
+      ...current,
+      pinnedIds: ["managed:b", "managed:a"],
+      orderedIds: ["managed:b", "managed:a"],
+    })),
+  );
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(library.conflict).toBe(true);
+  state.get.mockResolvedValueOnce({
+    pinnedIds: pins,
+    orderedIds: pins,
+    layout: "list",
+    revision: 2,
+  });
+  state.save.mockImplementationOnce(
+    async ({ data }: { data: PortalPreferences }) => ({ ...data, revision: 3 }),
+  );
+  await act(async () => {
+    await library.reapplyConflict();
+  });
+  expect(state.save).toHaveBeenLastCalledWith({
+    data: expect.objectContaining({
+      pinnedIds: ["managed:b", "managed:a"],
+      orderedIds: ["managed:b", "managed:a"],
+      layout: "list",
+      expectedRevision: 2,
+    }),
+  });
+});
+
 it("never persists preferences or managed apps in a browser snapshot", async () => {
   const { dehydrate } = await import("@tanstack/react-query");
   const snapshot = dehydrate(client, {

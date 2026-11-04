@@ -32,6 +32,8 @@ type PreferenceOperation = {
   collections?: PortalPreferences["collections"];
   assignments?: PortalPreferences["assignments"];
   pins: { id: string; pinned: boolean }[];
+  pinOrder?: string[];
+  order?: string[];
   swap?: [movedId: string, neighborId: string, direction: -1 | 1];
 };
 
@@ -47,6 +49,16 @@ function preferenceOperation(
       : {}),
     ...(before.assignments !== after.assignments
       ? { assignments: after.assignments }
+      : {}),
+    // A launcher move has no legacy swap argument. Preserve its explicit intent
+    // for the conflict dialog, without overwriting unrelated remote fields.
+    ...(!swap && before.orderedIds.join("\0") !== after.orderedIds.join("\0")
+      ? { order: after.orderedIds }
+      : {}),
+    ...(before.pinnedIds.length === after.pinnedIds.length &&
+    before.pinnedIds.every((id) => after.pinnedIds.includes(id)) &&
+    before.pinnedIds.join("\0") !== after.pinnedIds.join("\0")
+      ? { pinOrder: after.pinnedIds }
       : {}),
     pins: [...new Set([...before.pinnedIds, ...after.pinnedIds])]
       .filter(
@@ -86,8 +98,8 @@ function replayOperations(
     }
     return {
       ...current,
-      pinnedIds,
-      orderedIds,
+      pinnedIds: operation.pinOrder ?? pinnedIds,
+      orderedIds: operation.order ?? orderedIds,
       layout: operation.layout ?? current.layout,
       collections: operation.collections ?? current.collections,
       assignments: operation.assignments ?? current.assignments,
