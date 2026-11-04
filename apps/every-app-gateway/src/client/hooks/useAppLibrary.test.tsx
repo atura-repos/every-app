@@ -36,7 +36,6 @@ vi.mock("@/serverFunctions/apps", () => ({ getMyApps: state.appsFetch }));
 vi.mock("@/client/tanstack-db", () => ({
   userAppsCollection: { utils: { refetch: vi.fn() } },
   useQueryFailed: () => false,
-  useQueryPending: () => false,
 }));
 vi.mock("@tanstack/react-db", () => ({
   useLiveQuery: () => ({

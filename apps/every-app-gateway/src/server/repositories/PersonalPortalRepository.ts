@@ -9,7 +9,7 @@ export type PortalPreferences = {
   revision?: number;
 };
 
-export class PortalPreferencesConflict extends Error {
+class PortalPreferencesConflict extends Error {
   readonly code = "PORTAL_PREFERENCES_CONFLICT";
   constructor() {
     super("Portal layout changed elsewhere");
