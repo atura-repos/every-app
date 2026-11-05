@@ -15,6 +15,29 @@ vi.mock("./AppListItem", () => ({
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
+it("takes a member directly to the personal link form", () => {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  act(() =>
+    root.render(
+      <LauncherView
+        {...({
+          apps: [],
+          preferences: { pinnedIds: [], orderedIds: [], layout: "grid" },
+          layout: "grid",
+          onUpdate: vi.fn(),
+          onOpenSetup: vi.fn(),
+          onUseMcp: vi.fn(),
+        } as any)}
+      />,
+    ),
+  );
+  const add = [...container.querySelectorAll("a")].find((a) =>
+    a.textContent?.includes("Add my own link"),
+  );
+  expect(add?.getAttribute("href")).toBe("/settings#add-personal-link");
+  act(() => root.unmount());
+});
 it("shows a single combined result count and never matches a private URL", () => {
   const container = document.createElement("div");
   const root = createRoot(container);
