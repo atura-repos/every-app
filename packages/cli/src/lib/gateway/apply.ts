@@ -76,6 +76,7 @@ import { readInstall, writeInstall, type InstallRecord } from "./install";
 import { acquireGatewayLease, LeasePurpose, type Lease } from "./lease";
 import { gatewayDomains, patchGatewayBuildOutput } from "./patchBuildOutput";
 import {
+  assertGatewayReleaseTarget,
   compareReleaseOrder,
   describeOrigin,
   type CandidateRelease,
@@ -313,6 +314,7 @@ export async function applyGateway(
   options: ApplyGatewayOptions,
 ): Promise<ApplyGatewayResult> {
   const { cf, reason, release, db } = options;
+  assertGatewayReleaseTarget(release, options.gatewayHost);
   const ownLease = options.heldLease
     ? null
     : await acquireGatewayLease(options, GATEWAY_LEASE_PURPOSES[reason]);

@@ -24,7 +24,7 @@ import {
   type ApplyGatewayResult,
 } from "@/lib/gateway/apply";
 import type { InstallRecord } from "@/lib/gateway/install";
-import type { GatewayRelease } from "@/lib/gateway/release";
+import { assertGatewayReleaseTarget, type GatewayRelease } from "@/lib/gateway/release";
 import { ensureGatewayResources, existingGatewayResources } from "@/lib/gateway/resources";
 import { CLI, thisCommandWithout } from "@/lib/output/command";
 import type { EventSink } from "@/lib/output/events";
@@ -155,6 +155,7 @@ export async function deployGatewayRelease({
     >;
   }): Promise<{ result: ApplyGatewayResult; db: D1Database }> {
   const { certificates, names, ...applyOptions } = options;
+  assertGatewayReleaseTarget(release, target.domain);
   const resources = existing
     ? await existingGatewayResources(cf, names)
     : await ensureGatewayResources(cf, names);

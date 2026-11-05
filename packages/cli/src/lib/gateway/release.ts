@@ -59,10 +59,17 @@ export const BaseReleaseSchema = z.looseObject({
 });
 
 const ReleaseManifestSchema = BaseReleaseSchema.extend({
+  schema: z.union([z.literal(1), z.literal(2)]),
   /** When the Gateway's sources were last committed (ISO), if git said. */
   committedAt: z.string().optional(),
   pluginVersion: z.string(),
   configVersion: z.string(),
+  stagingOnly: z.object({
+    gatewayHost: z.literal("stage-apps.atura.nl"),
+    feature: z.literal("settings-diagnostics"),
+  }).optional(),
+}).refine((manifest) => (manifest.schema === 2) === Boolean(manifest.stagingOnly), {
+  message: "Schema 2 requires stagingOnly; schema 1 cannot contain stagingOnly",
 });
 type ReleaseManifest = z.infer<typeof ReleaseManifestSchema>;
 
@@ -74,6 +81,17 @@ export interface GatewayRelease {
   /** What it was built from. */
   source: ReleaseSource;
   cleanup(): Promise<void>;
+}
+
+/** Reject a diagnostic release before provisioning, leasing or changing any live state. */
+export function assertGatewayReleaseTarget(release: GatewayRelease, gatewayHost: string): void {
+  const stage = release.manifest.stagingOnly;
+  if (stage && gatewayHost !== stage.gatewayHost) {
+    throw new EveryAppError(
+      "RELEASE_TARGET_MISMATCH",
+      `This staging-only diagnostic release can only be installed at ${stage.gatewayHost}, not ${gatewayHost}.`,
+    );
+  }
 }
 
 /** Where a release came from, as setup and the downgrade guard say it. */
@@ -321,7 +339,7 @@ const RELEASE_NAMES: Record<ReleaseKind, { a: string; the: string }> = {
  * that `schema` reads, in a Build Output format this CLI deploys, whose
  * SHA-256 is the one release.json records.
  */
-export async function extractRelease<T extends z.infer<typeof BaseReleaseSchema>>(
+export async function extractRelease<T extends { buildOutputVersion: string; version: string; sha256: string }>(
   tarball: string,
   kind: ReleaseKind,
   schema: z.ZodType<T>,

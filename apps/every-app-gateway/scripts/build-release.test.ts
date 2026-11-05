@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -113,6 +114,65 @@ afterEach(() => {
 });
 
 describe("stageRelease", () => {
+  it("accepts a minimal ordinary Build Output without a client asset directory", () => {
+    fs.rmSync(
+      path.join(gatewayDir, ".cloudflare/output/v0/workers/default/assets"),
+      { recursive: true },
+    );
+    expect(stageRelease({ gatewayDir, stageDir, build: BUILD }).schema).toBe(1);
+  });
+  it("refuses an ordinary release when the diagnostic client chunk is present", () => {
+    write(
+      ".cloudflare/output/v0/workers/default/assets/assets/diagnostics.js",
+      "Staging settings diagnostics (read-only)",
+    );
+    expect(() => stageRelease({ gatewayDir, stageDir, build: BUILD })).toThrow(
+      /diagnostic.*ordinary/i,
+    );
+  });
+
+  it("marks a verified opt-in diagnostic release as staging-only", () => {
+    write(
+      ".cloudflare/output/v0/workers/default/assets/assets/diagnostics.js",
+      "Staging settings diagnostics (read-only)",
+    );
+    const manifest = stageRelease({
+      gatewayDir,
+      stageDir,
+      build: {
+        ...BUILD,
+        stagingOnly: {
+          gatewayHost: "stage-apps.atura.nl",
+          feature: "settings-diagnostics",
+        },
+      },
+    });
+    expect(manifest.schema).toBe(2);
+    expect(manifest.stagingOnly).toEqual({
+      gatewayHost: "stage-apps.atura.nl",
+      feature: "settings-diagnostics",
+    });
+    expect(
+      JSON.parse(fs.readFileSync(path.join(stageDir, "release.json"), "utf8"))
+        .stagingOnly,
+    ).toEqual(manifest.stagingOnly);
+  });
+
+  it("refuses a labelled diagnostic release whose asset is absent", () => {
+    expect(() =>
+      stageRelease({
+        gatewayDir,
+        stageDir,
+        build: {
+          ...BUILD,
+          stagingOnly: {
+            gatewayHost: "stage-apps.atura.nl",
+            feature: "settings-diagnostics",
+          },
+        },
+      }),
+    ).toThrow(/diagnostic.*absent/i);
+  });
   it("stages only the Build Output, the migrations and release.json", () => {
     const manifest = stageRelease({ gatewayDir, stageDir, build: BUILD });
 
@@ -192,6 +252,54 @@ describe("stageRelease", () => {
     expect(() => stageRelease({ gatewayDir, stageDir, build: BUILD })).toThrow(
       /\.dev\.vars[\s\S]*key\.pem/,
     );
+  });
+});
+
+describe("Atura release workflow guards", () => {
+  const workflow = fs.readFileSync(
+    path.resolve(
+      import.meta.dirname,
+      "../../../.github/workflows/atura-release.yml",
+    ),
+    "utf8",
+  );
+  it("attributes both release note variants to the checked-out tag commit", () => {
+    expect(workflow).toContain('release_sha="$(git rev-parse HEAD)"');
+    expect(
+      workflow.match(/Built from \$release_sha in atura-repos\/every-app/g),
+    ).toHaveLength(2);
+    expect(workflow).not.toContain("$GITHUB_SHA");
+  });
+  it("defaults to an ordinary artifact and passes the opt-in to build and pack", () => {
+    expect(workflow).toMatch(
+      /staging_diagnostics:\s*\n[^]*?default: false\s*\n\s*type: boolean/,
+    );
+    expect(
+      workflow.match(
+        /ATURA_STAGE_DIAGNOSTICS: \$\{\{ inputs\.staging_diagnostics && 'true' \|\| 'false' \}\}/g,
+      ),
+    ).toHaveLength(3);
+    expect(workflow).toContain("--staging-diagnostics");
+    expect(workflow).toContain("STAGING ONLY diagnostic build");
+    expect(workflow).not.toMatch(/\bcf deploy\b|\beveryapp update\b/);
+  });
+  it("accepts only Atura numeric prerelease tags", () => {
+    const match = workflow.match(/\[\[ ! "\$TAG" =~ (\^[^\n]+\$) \]\]/);
+    expect(match).not.toBeNull();
+    for (const [tag, expected] of [
+      ["atura-gateway-v0.3.0-atura.8", true],
+      ["atura-gateway-v0.3.0-atura.8-extra", false],
+      ["atura-gateway-v0.3.0", false],
+      ["gateway-v0.3.0-atura.8", false],
+      ["atura-gateway-v0x3x0-atura.8", false],
+    ] as const) {
+      const result = execFileSync(
+        "bash",
+        ["-c", `[[ "$TAG" =~ ${match![1]} ]] && echo yes || echo no`],
+        { env: { ...process.env, TAG: tag }, encoding: "utf8" },
+      ).trim();
+      expect(result === "yes", tag).toBe(expected);
+    }
   });
 });
 

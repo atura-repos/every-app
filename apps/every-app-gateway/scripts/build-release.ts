@@ -47,7 +47,7 @@ const GATEWAY_SOURCES = [
 ];
 
 export interface ReleaseManifest {
-  schema: 1;
+  schema: 1 | 2;
   /** What the release deploys (the CLI reads a missing one as a Gateway). */
   kind: "gateway";
   version: string;
@@ -68,6 +68,11 @@ export interface ReleaseManifest {
   migrations: Array<{ tag: string; when: number }>;
   minCli: string;
   minSdk: string;
+  /** This opt-in build must never be installed on any other Gateway host. */
+  stagingOnly?: {
+    gatewayHost: "stage-apps.atura.nl";
+    feature: "settings-diagnostics";
+  };
 }
 
 export interface StageReleaseOptions {
@@ -103,6 +108,26 @@ export function stageRelease({
   const buildOutputVersion = versions[0]!;
   const outputDir = path.join(outputRoot, buildOutputVersion);
   checkBuildOutput(outputDir);
+  const clientAssets = path.join(outputDir, "workers", "default", "assets");
+  const diagnosticPresent =
+    fs.existsSync(clientAssets) &&
+    listFiles(clientAssets).some(
+      (file) =>
+        file.endsWith(".js") &&
+        fs
+          .readFileSync(path.join(clientAssets, file), "utf8")
+          .includes("Staging settings diagnostics (read-only)"),
+    );
+  if (diagnosticPresent && !build.stagingOnly) {
+    throw new ReleaseBuildError(
+      "Diagnostic asset present in ordinary release; refusing to pack it.",
+    );
+  }
+  if (build.stagingOnly && !diagnosticPresent) {
+    throw new ReleaseBuildError(
+      "Diagnostic asset absent from staging-only release; refusing inert release.",
+    );
+  }
 
   fs.rmSync(stageDir, { recursive: true, force: true });
   fs.mkdirSync(stageDir, { recursive: true });
@@ -124,7 +149,8 @@ export function stageRelease({
   checkStagedFiles(stageDir);
 
   const manifest: ReleaseManifest = {
-    schema: 1,
+    // Old CLIs accept only schema 1; schema 2 forces the new target guard.
+    schema: build.stagingOnly ? 2 : 1,
     kind: "gateway",
     ...build,
     buildOutputVersion,
@@ -330,6 +356,12 @@ function run(command: string, args: string[]): void {
 
 function main(): void {
   const args = process.argv.slice(2);
+  const diagnostics = args.includes("--staging-diagnostics");
+  if (diagnostics !== (process.env.ATURA_STAGE_DIAGNOSTICS === "true")) {
+    throw new ReleaseBuildError(
+      "--staging-diagnostics and ATURA_STAGE_DIAGNOSTICS=true must be set together.",
+    );
+  }
   const tarball = path.resolve(
     argument(args, "--out") ?? path.join(GATEWAY_DIR, TARBALL_NAME),
   );
@@ -380,6 +412,14 @@ function main(): void {
         pluginVersion: packageVersion("@cloudflare/vite-plugin", GATEWAY_DIR),
         configVersion: packageVersion("@cloudflare/config", cfDir),
         ...minimumVersions(REPO_ROOT),
+        ...(diagnostics
+          ? {
+              stagingOnly: {
+                gatewayHost: "stage-apps.atura.nl" as const,
+                feature: "settings-diagnostics" as const,
+              },
+            }
+          : {}),
       },
     });
     fs.rmSync(tarball, { force: true });
