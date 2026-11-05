@@ -185,6 +185,77 @@ it("saves a collection with the same revision-safe queue as pinning", async () =
   );
 });
 
+it("shows conflict and reapplies only the moved typed shortcut over a remote assignment", async () => {
+  const collections = [
+    { id: "work", name: "Work" },
+    { id: "home", name: "Home" },
+  ];
+  const original = {
+    ...initial,
+    collections,
+    assignments: { "personal:1": "work", "external:2": "work" },
+    revision: 4,
+  };
+  act(() =>
+    client.setQueryData(["portal-preferences", "alice", "one"], original),
+  );
+  render();
+  state.save.mockRejectedValueOnce({ code: "PORTAL_PREFERENCES_CONFLICT" });
+  act(() =>
+    library.updateLauncher((current) => ({
+      ...current,
+      assignments: { ...current.assignments, "personal:1": "home" },
+    })),
+  );
+  await vi.waitFor(() => expect(library.conflict).toBe(true));
+  expect(state.save).toHaveBeenCalledWith({
+    data: expect.objectContaining({ expectedRevision: 4 }),
+  });
+  expect(library.preferences.assignments).toEqual(original.assignments);
+  state.get.mockResolvedValueOnce({
+    ...original,
+    assignments: { "personal:1": "work", "external:2": "home" },
+    revision: 5,
+  });
+  state.save.mockImplementationOnce(
+    async ({ data }: { data: PortalPreferences }) => ({ ...data, revision: 6 }),
+  );
+  await act(async () => {
+    await library.reapplyConflict();
+  });
+  expect(state.save).toHaveBeenLastCalledWith({
+    data: expect.objectContaining({
+      assignments: { "personal:1": "home", "external:2": "home" },
+      expectedRevision: 5,
+    }),
+  });
+  expect(library.conflict).toBe(false);
+});
+
+it("rolls a failed shortcut move back to confirmed preferences with a visible error", async () => {
+  const original = {
+    ...initial,
+    assignments: { "personal:1": "work" },
+    revision: 2,
+  };
+  act(() =>
+    client.setQueryData(["portal-preferences", "alice", "one"], original),
+  );
+  render();
+  state.save.mockRejectedValueOnce(new Error("offline"));
+  act(() =>
+    library.updateLauncher((current) => ({
+      ...current,
+      assignments: { "personal:1": "home" },
+    })),
+  );
+  await vi.waitFor(() => expect(library.saveStatus).toBe("error"));
+  expect(library.preferences.assignments).toEqual(original.assignments);
+  expect(state.save).toHaveBeenCalledWith({
+    data: expect.objectContaining({ expectedRevision: 2 }),
+  });
+});
+
 it("reapplies a launcher pin-order move after a two-browser conflict", async () => {
   const pins = ["managed:a", "managed:b"];
   act(() =>

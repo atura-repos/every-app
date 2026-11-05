@@ -261,3 +261,142 @@ it("focuses launcher search with Cmd/Ctrl+K and releases the shortcut on unmount
   expect(event.defaultPrevented).toBe(false);
   container.remove();
 });
+
+it("keeps pin state when moving to Other by pointer and ignores canceled gestures", () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  let preferences = {
+    pinnedIds: ["personal:1"],
+    orderedIds: [] as string[],
+    layout: "grid" as const,
+    collections: [{ id: "work", name: "Work" }],
+    assignments: { "personal:1": "work" } as Record<string, string>,
+  };
+  const update = vi.fn(
+    (change: (value: typeof preferences) => typeof preferences) => {
+      preferences = change(preferences);
+      root.render(
+        <LauncherView {...(props as any)} preferences={preferences} />,
+      );
+    },
+  );
+  const props = {
+    apps: [],
+    personalLinks: [{ id: "1", name: "Notes", url: "https://example.org/" }],
+    layout: "grid" as const,
+    onUpdate: update,
+    onOpenSetup: vi.fn(),
+    onUseMcp: vi.fn(),
+  };
+  act(() =>
+    root.render(<LauncherView {...(props as any)} preferences={preferences} />),
+  );
+  const handle = container.querySelector<HTMLButtonElement>(
+    '[aria-label="Drag Notes to a collection"]',
+  )!;
+  const hit = vi
+    .spyOn(document, "elementFromPoint")
+    .mockReturnValue(container.querySelector('section[aria-label="Other"]')!);
+  const pointer = (type: string, x: number, y: number) => {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.assign(event, {
+      pointerId: 3,
+      pointerType: "touch",
+      clientX: x,
+      clientY: y,
+      button: 0,
+    });
+    act(() => handle.dispatchEvent(event));
+  };
+  pointer("pointerdown", 1, 1);
+  pointer("pointermove", 30, 30);
+  pointer("pointercancel", 30, 30);
+  pointer("pointerup", 30, 30);
+  expect(update).not.toHaveBeenCalled();
+  pointer("pointerdown", 1, 1);
+  pointer("pointermove", 30, 30);
+  pointer("pointerup", 30, 30);
+  expect(preferences.assignments).toEqual({});
+  expect(preferences.pinnedIds).toEqual(["personal:1"]);
+  expect(
+    container.querySelector('section[aria-label="Pinned"]')?.textContent,
+  ).toContain("Notes");
+  expect(
+    container.querySelector('section[aria-label="Other"]')?.textContent,
+  ).not.toContain("Notes");
+  hit.mockRestore();
+  act(() => root.unmount());
+  container.remove();
+});
+
+it("moves a typed shortcut across collections by touch pointer without opening its link", () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  let preferences = {
+    pinnedIds: [] as string[],
+    orderedIds: [] as string[],
+    layout: "grid" as const,
+    collections: [
+      { id: "work", name: "Work" },
+      { id: "home", name: "Home" },
+    ],
+    assignments: { "personal:1": "work" } as Record<string, string>,
+    revision: 7,
+  };
+  const props = {
+    apps: [],
+    personalLinks: [{ id: "1", name: "Notes", url: "https://example.org/" }],
+    layout: "grid" as const,
+    onUpdate: (change: (value: typeof preferences) => typeof preferences) => {
+      preferences = change(preferences);
+      root.render(
+        <LauncherView {...(props as any)} preferences={preferences} />,
+      );
+    },
+    onOpenSetup: vi.fn(),
+    onUseMcp: vi.fn(),
+  };
+  act(() =>
+    root.render(<LauncherView {...(props as any)} preferences={preferences} />),
+  );
+  const handle = container.querySelector<HTMLButtonElement>(
+    '[aria-label="Drag Notes to a collection"]',
+  )!;
+  expect(handle).not.toBeNull();
+  const destination = container.querySelector<HTMLElement>(
+    'section[aria-label="Home"]',
+  )!;
+  const hit = vi
+    .spyOn(document, "elementFromPoint")
+    .mockReturnValue(destination);
+  const pointer = (type: string, x: number, y: number) => {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.assign(event, {
+      pointerId: 3,
+      pointerType: "touch",
+      clientX: x,
+      clientY: y,
+      button: 0,
+    });
+    act(() => handle.dispatchEvent(event));
+  };
+  pointer("pointerdown", 1, 1);
+  pointer("pointermove", 25, 25);
+  pointer("pointerup", 25, 25);
+  expect(preferences.assignments).toEqual({ "personal:1": "home" });
+  expect(preferences.revision).toBe(7);
+  expect(
+    container.querySelector('section[aria-label="Home"]')?.textContent,
+  ).toContain("Notes");
+  expect(
+    container.querySelector('section[aria-label="Work"]')?.textContent,
+  ).not.toContain("Notes");
+  expect(
+    container.querySelector('a[href="https://example.org/"]'),
+  ).not.toBeNull();
+  hit.mockRestore();
+  act(() => root.unmount());
+  container.remove();
+});

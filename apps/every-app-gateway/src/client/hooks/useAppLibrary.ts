@@ -30,7 +30,7 @@ export enum AppLibraryLayout {
 type PreferenceOperation = {
   layout?: PortalPreferences["layout"];
   collections?: PortalPreferences["collections"];
-  assignments?: PortalPreferences["assignments"];
+  assignmentChanges?: { key: string; collectionId: string | null }[];
   pins: { id: string; pinned: boolean }[];
   pinOrder?: string[];
   order?: string[];
@@ -48,7 +48,21 @@ function preferenceOperation(
       ? { collections: after.collections }
       : {}),
     ...(before.assignments !== after.assignments
-      ? { assignments: after.assignments }
+      ? {
+          assignmentChanges: [
+            ...new Set([
+              ...Object.keys(before.assignments ?? {}),
+              ...Object.keys(after.assignments ?? {}),
+            ]),
+          ]
+            .filter(
+              (key) => before.assignments?.[key] !== after.assignments?.[key],
+            )
+            .map((key) => ({
+              key,
+              collectionId: after.assignments?.[key] ?? null,
+            })),
+        }
       : {}),
     // A launcher move has no legacy swap argument. Preserve its explicit intent
     // for the conflict dialog, without overwriting unrelated remote fields.
@@ -96,13 +110,20 @@ function replayOperations(
           ...(direction === 1 ? [neighborId, movedId] : [movedId, neighborId]),
         );
     }
+    const assignments = { ...current.assignments };
+    for (const { key, collectionId } of operation.assignmentChanges ?? []) {
+      if (collectionId === null) delete assignments[key];
+      else assignments[key] = collectionId;
+    }
     return {
       ...current,
       pinnedIds: operation.pinOrder ?? pinnedIds,
       orderedIds: operation.order ?? orderedIds,
       layout: operation.layout ?? current.layout,
       collections: operation.collections ?? current.collections,
-      assignments: operation.assignments ?? current.assignments,
+      assignments: operation.assignmentChanges
+        ? assignments
+        : current.assignments,
     };
   }, latest);
 }
