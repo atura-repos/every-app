@@ -265,7 +265,9 @@ describe("Atura release workflow guards", () => {
   );
   it("attributes both release note variants to the checked-out tag commit", () => {
     expect(workflow).toContain('release_sha="$(git rev-parse HEAD)"');
-    expect(workflow.match(/Built from \$release_sha in atura-repos\/every-app/g)).toHaveLength(2);
+    expect(
+      workflow.match(/Built from \$release_sha in atura-repos\/every-app/g),
+    ).toHaveLength(2);
     expect(workflow).not.toContain("$GITHUB_SHA");
   });
   it("defaults to an ordinary artifact and passes the opt-in to build and pack", () => {
