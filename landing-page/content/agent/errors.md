@@ -1347,6 +1347,14 @@ A release's `release.json` names a `buildOutputVersion` other than `v0`, the onl
 
 Source: `packages/cli/src/lib/gateway/release.ts`
 
+### RELEASE_TARGET_MISMATCH
+
+An Atura staging-only Gateway release (`release.json` schema 2 with `stagingOnly.gatewayHost: "stage-apps.atura.nl"`) was given another Gateway hostname. The CLI refuses it before taking a deployment lease, migrating, or uploading. Message: `This staging-only diagnostic release can only be installed at stage-apps.atura.nl, not <hostname>.`
+
+**Fix:** do not deploy this tarball to production. Use an ordinary release for production; deploying to staging still requires separate approval. No rerun, not retryable.
+
+Source: `packages/cli/src/lib/gateway/apply.ts`
+
 ### REMOTE_MCP_INVALID
 
 `mcp add` was given something a remote MCP app can't be. From the flags, before connecting (`authFromFlags`): `--header names the header of --auth header` (with another `--auth`; `fix` `drop --header, or use --auth header`), `--auth header needs --header <name>: the header the server reads the credential from` (`fix` `add --header X-Api-Key (the name the server's docs give)`), `--secret names a credential, and --auth none|oauth sends none` (likewise `--from-env`; `fix` `drop --secret, or use --auth bearer, header or basic`). From the registry rules (`planRemoteMcpAppAdd` in `packages/perimeter/src/registry/remoteMcpApps.ts`, status 400, nothing written): no id could be read from the URL's host (`give one with --name`), an id that isn't kebab-case, is over 32 characters, is `everyapp`, or is a built-in's (`"dataforseo" is the Gateway's built-in MCP app; a remote server can't take its id`), a `--risk` outside `annotations`, `read`, `write`, a credential name outside the `_MCP_TOKEN` family (`the credential's name must end in _MCP_TOKEN (letters, digits and underscores), like TREG_MCP_TOKEN`), a header name the Gateway sets or routes by (`auth.header can't be Authorization; use kind "bearer" or "basic" for Authorization`). `mcp tool` and the Gateway's own surfaces raise the registry's for an empty tool name or a bad risk.
