@@ -6,7 +6,7 @@ import {
 } from "@/client/components/ui/toggle-group";
 
 /** `Compact` sits in a menu; `Toolbar` matches the other 40px controls on a row. */
-export enum SegmentedToggleSize {
+enum SegmentedToggleSize {
   Compact = "compact",
   Toolbar = "toolbar",
 }

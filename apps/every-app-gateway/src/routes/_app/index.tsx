@@ -2,93 +2,49 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useSession } from "@/client/hooks/useSession";
 import { useState, useEffect, useRef } from "react";
 import { z } from "zod";
-import { LayoutGrid, List, Search, Settings2, X } from "lucide-react";
-import { cn } from "cn";
 import { PWAInstallModal } from "@/client/components/PWAInstallModal";
 import { AppGallery } from "@/client/components/onboarding/AppGallery";
 import { BuildYourOwnDialog } from "@/client/components/onboarding/BuildYourOwnDialog";
 import { FeaturedAppDialog } from "@/client/components/onboarding/FeaturedAppDialog";
-import {
-  AppListItem,
-  AppListItemSkeleton,
-} from "@/client/components/AppListItem";
 import { AppSetupDialog } from "@/client/components/AppSetupDialog";
-import { EmptyState } from "@/client/components/EmptyState";
-import { ErrorState } from "@/client/components/ErrorState";
 import { McpAppDialog } from "@/client/components/McpAppDialog";
-import { PageHeader, SectionHeader } from "@/client/components/PageHeader";
-import {
-  SegmentedToggle,
-  SegmentedToggleSize,
-} from "@/client/components/SegmentedToggle";
-import { Badge } from "@/client/components/ui/badge";
+import { PageHeader } from "@/client/components/PageHeader";
+import { LauncherView } from "@/client/components/LauncherView";
 import { Button } from "@/client/components/ui/button";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/client/components/ui/input-group";
-import { Kbd } from "@/client/components/ui/kbd";
-import { AppLibraryLayout, useAppLibrary } from "@/client/hooks/useAppLibrary";
+import { useAppLibrary } from "@/client/hooks/useAppLibrary";
 import { useSetupDialog } from "@/client/hooks/useSetupDialog";
 import { useMcpParam, useSetupParam } from "@/client/hooks/useSetupParam";
-import { useShortcutLabel } from "@/client/hooks/useShortcutLabel";
 import type { FeaturedApp } from "@/client/lib/featuredApps";
-import { FIRST_SCREEN } from "@/client/lib/firstScreen";
 import { authClient } from "@/client/auth-client";
 import { isMcpApp } from "@/client/lib/appStatus";
 import type { UserAccessApp } from "@/types/app";
 import { userAppsCollection } from "@/client/tanstack-db";
 import { useExternalLinks } from "@/client/hooks/useExternalLinks";
-import { ExternalLinkList } from "@/client/components/ExternalLinkList";
-import { LauncherPersonalLinks } from "@/client/components/LauncherPersonalLinks";
 import { usePersonalLinks } from "@/client/hooks/usePersonalLinks";
-
-/** What the "MCP apps" section says once, so its cards need only a chip. */
-const MCP_APPS_HINT =
-  "Your agent uses these through this Gateway's MCP address. Nothing to open.";
-
-// An outline button on the card surface (white in light mode), so it stands
-// out from the page and the empty state's background.
-const cardButtonClass = "bg-card hover:bg-card/80 dark:bg-card";
 
 const searchSchema = z.object({
   pwa: z
     .union([z.boolean(), z.literal("true"), z.literal("false")])
-    .transform((val) => val === true || val === "true")
+    .transform((value) => value === true || value === "true")
     .optional()
     .catch(undefined),
-  // The app id of a setup dialog to open: where the perimeter sends someone
-  // who tried to open an app that needs setup, and the sidebar's pinned
-  // apps link.
   setup: z.string().optional().catch(undefined),
-  // The app id of an MCP app whose "Use it from your agent" dialog to
-  // open: where a pinned MCP app in the sidebar leads.
   mcp: z.string().optional().catch(undefined),
 });
-
 export const Route = createFileRoute("/_app/")({
   validateSearch: searchSchema,
   component: App,
 });
-
-/** The launcher's list, from the server (not the query cache). */
 function refetchApps() {
   return userAppsCollection.utils.refetch();
 }
-
 function App() {
   const session = useSession();
   const { pwa: pwaParam, setup: setupParam, mcp: mcpParam } = Route.useSearch();
   const [showPWAInstallModal, setShowPWAInstallModal] = useState(false);
-  // The gallery's dialogs: one of the four apps, or Build your own.
   const [pickedApp, setPickedApp] = useState<FeaturedApp | null>(null);
   const [buildOpen, setBuildOpen] = useState(false);
   const [mcpApp, setMcpApp] = useState<UserAccessApp | null>(null);
-  const [search, setSearch] = useState("");
-  const searchRef = useRef<HTMLInputElement>(null);
-  const searchShortcut = useShortcutLabel("K");
   const navigate = useNavigate();
   const hasStrippedPwaParam = useRef(false);
   const { data: activeMemberRole, isPending: isMemberRolePending } =
@@ -99,17 +55,14 @@ function App() {
     apps,
     isLoading,
     isError,
-    pinnedIds,
+    preferences,
     layout,
-    togglePin,
-    setLayout,
-    moveApp,
+    updateLauncher,
+    saveStatus,
     conflict,
     reloadConflict,
     reapplyConflict,
   } = useAppLibrary();
-  // The selection is only an id; metadata and authorization must come from
-  // the currently validated library, never the object saved when it opened.
   const selectedMcpApp =
     !isLoading && !isError && mcpApp
       ? apps.find((app) => app.id === mcpApp.id && isMcpApp(app))
@@ -120,37 +73,33 @@ function App() {
   const {
     data: personalLinks,
     isError: personalLinksError,
+    isPending: personalLinksPending,
     refetch: refetchPersonalLinks,
   } = usePersonalLinks();
   const {
     data: externalLinks,
     isError: linksError,
+    isPending: linksPending,
     refetch: refetchLinks,
   } = useExternalLinks();
-  // The setup dialog's app, read from the live list: it closes by itself
-  // once the app is ready.
   const {
     app: setupApp,
     open: openSetup,
     close: closeSetup,
   } = useSetupDialog(apps, refetchApps);
-
   useEffect(() => {
     if (
       !session.isPending &&
       session.data?.user &&
       !session.data.session.activeOrganizationId
-    ) {
+    )
       void navigate({ to: "/organizations" });
-    }
   }, [
     navigate,
     session.data?.session.activeOrganizationId,
     session.data?.user,
     session.isPending,
   ]);
-
-  // One-shot params are stripped, so the launcher's home is "/".
   useEffect(() => {
     if (pwaParam && !hasStrippedPwaParam.current) {
       setShowPWAInstallModal(true);
@@ -158,9 +107,6 @@ function App() {
       void navigate({ to: "/", search: {}, replace: true });
     }
   }, [pwaParam, navigate]);
-
-  // `?setup=<appId>`: once the list is in, open that app's setup dialog if
-  // it still needs setup, and strip the param either way.
   useSetupParam({
     setupParam,
     apps,
@@ -168,8 +114,6 @@ function App() {
     open: openSetup,
     strip: () => void navigate({ to: "/", search: {}, replace: true }),
   });
-
-  // `?mcp=<appId>`: the same, for an MCP app's dialog.
   useMcpParam({
     mcpParam,
     apps,
@@ -177,92 +121,35 @@ function App() {
     open: setMcpApp,
     strip: () => void navigate({ to: "/", search: {}, replace: true }),
   });
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
   if (
     !session.isPending &&
     session.data?.user &&
     !session.data.session.activeOrganizationId
   )
     return null;
-
-  const query = search.trim().toLocaleLowerCase();
-  // Already pinned first, then by name. Apps with a page fill the grid;
-  // MCP apps (no page; their tools are on /mcp) have a section of their
-  // own below it, so a search narrows both and an empty section goes.
-  const visibleApps = apps.filter((app) =>
-    `${app.name} ${app.description}`.toLocaleLowerCase().includes(query),
-  );
-  const pageApps = visibleApps.filter((app) => !isMcpApp(app));
-  const mcpApps = visibleApps.filter((app) => isMcpApp(app));
-  // The grid, its toolbar and the search are for apps with a page; a
-  // workspace whose only app is an MCP app still gets the gallery (there
-  // is nothing to open yet) with the MCP apps section under it.
-  const hasPageApps = apps.some((app) => !isMcpApp(app));
-  const renderApp = (app: UserAccessApp) => (
-    <AppListItem
-      key={app.id}
-      app={app}
-      pinned={pinnedIds.has(app.id)}
-      onTogglePin={() => togglePin(app.id)}
-      onMoveUp={() => moveApp(app.id, -1)}
-      onMoveDown={() => moveApp(app.id, 1)}
-      onOpenSetup={() => openSetup(app)}
-      onUseMcp={() => setMcpApp(app)}
-      layout={layout}
-    />
-  );
-  const gridClassName = cn(
-    "grid gap-4",
-    layout === AppLibraryLayout.Grid && "md:grid-cols-2 xl:grid-cols-3",
-  );
-  const manageAppsButton = (
-    <Button
-      variant="outline"
-      className={cardButtonClass}
-      nativeButton={false}
-      render={<Link to="/admin/apps" />}
-    >
-      <Settings2 data-icon="inline-start" />
-      Manage apps
-    </Button>
-  );
-
   return (
-    // The page starts 20px down, like the sidebar's brand row, so the title
-    // and the brand share a center line.
     <div className="px-5 py-5 pb-safe md:px-10 lg:px-12">
       <div className="mx-auto max-w-7xl space-y-4">
         <PageHeader
-          title={
-            <>
-              All apps
-              {!isLoading && !isError && apps.length > 0 ? (
-                // Everything this person can open, the sidebar's number too;
-                // a search narrows the grid, not the count.
-                <Badge
-                  variant="outline"
-                  className="rounded-md px-1.5 text-xs font-medium text-muted-foreground"
-                >
-                  {apps.length}
-                  <span className="sr-only"> apps</span>
-                </Badge>
-              ) : null}
-            </>
-          }
+          title="My workspace"
           actions={
             userCanManageApps ? (
-              <div className="hidden md:block">{manageAppsButton}</div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  nativeButton={false}
+                  render={<Link to="/admin/apps" />}
+                >
+                  Install managed app
+                </Button>
+                <Button
+                  variant="outline"
+                  nativeButton={false}
+                  render={<Link to="/admin/external-links" />}
+                >
+                  Publish Atura link
+                </Button>
+              </div>
             ) : null
           }
         />
@@ -285,179 +172,61 @@ function App() {
             </div>
           </div>
         ) : null}
-        {isError ? (
-          <ErrorState title="Failed to load apps" message="Please try again." />
+        {isLoading || personalLinksPending || linksPending ? (
+          <p role="status">Loading workspace</p>
         ) : null}
-
-        {hasPageApps ||
-        Boolean(externalLinks?.length) ||
-        (isLoading && !isError) ? (
-          <>
-            <div className="flex items-center gap-3">
-              <InputGroup className="border-border bg-card shadow-xs md:max-w-sm">
-                <InputGroupAddon>
-                  <Search aria-hidden />
-                </InputGroupAddon>
-                <InputGroupInput
-                  ref={searchRef}
-                  type="search"
-                  aria-label="Search your apps"
-                  placeholder="Search your apps…"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") {
-                      setSearch("");
-                      searchRef.current?.blur();
-                    }
-                  }}
-                />
-                {!search && searchShortcut ? (
-                  <InputGroupAddon
-                    align="inline-end"
-                    className="hidden md:flex"
-                  >
-                    <Kbd>{searchShortcut}</Kbd>
-                  </InputGroupAddon>
-                ) : null}
-                {search ? (
-                  <InputGroupAddon align="inline-end">
-                    <InputGroupButton
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Clear search"
-                      onClick={() => {
-                        setSearch("");
-                        searchRef.current?.focus();
-                      }}
-                    >
-                      <X aria-hidden />
-                    </InputGroupButton>
-                  </InputGroupAddon>
-                ) : null}
-              </InputGroup>
-              <div className="ml-auto hidden items-center gap-3 md:flex">
-                <SegmentedToggle
-                  size={SegmentedToggleSize.Toolbar}
-                  value={layout}
-                  onChange={setLayout}
-                  items={[
-                    {
-                      value: AppLibraryLayout.Grid,
-                      icon: <LayoutGrid className="size-4" />,
-                      label: "Grid view",
-                    },
-                    {
-                      value: AppLibraryLayout.List,
-                      icon: <List className="size-4" />,
-                      label: "List view",
-                    },
-                  ]}
-                />
-              </div>
-            </div>
-            {/* The count a screen reader hears as a search narrows the grid. */}
-            <p role="status" className="sr-only">
-              {query
-                ? `${visibleApps.length} ${visibleApps.length === 1 ? "app" : "apps"} found`
-                : ""}
+        {isError || personalLinksError || linksError ? (
+          <div role="alert" className="rounded border p-4">
+            <p>
+              {[
+                isError && "managed apps",
+                personalLinksError && "own links",
+                linksError && "Atura links",
+              ]
+                .filter(Boolean)
+                .join(", ")}{" "}
+              could not be loaded. List incomplete.
             </p>
-            {/* A search that matches only MCP apps leaves nothing for this
-                region: the matches are in the one below, so it isn't drawn
-                empty under a "Search results" name. */}
-            {hasPageApps &&
-            (isLoading || pageApps.length > 0 || visibleApps.length === 0) ? (
-              <section
-                aria-label={query ? "Search results" : "All apps"}
-                aria-busy={isLoading}
-              >
-                {isLoading ? (
-                  <ul className={gridClassName} aria-label="Loading apps">
-                    {Array.from({ length: 3 }, (_, index) => (
-                      <AppListItemSkeleton key={index} layout={layout} />
-                    ))}
-                  </ul>
-                ) : pageApps.length > 0 ? (
-                  <ul className={gridClassName}>{pageApps.map(renderApp)}</ul>
-                ) : (
-                  <EmptyState
-                    kind="filtered"
-                    title="No apps found"
-                    description="Try another app name or description."
-                    action={
-                      <Button
-                        variant="outline"
-                        className={cardButtonClass}
-                        onClick={() => setSearch("")}
-                      >
-                        Clear search
-                      </Button>
-                    }
-                  />
-                )}
-              </section>
-            ) : null}
-          </>
+            <Button
+              variant="outline"
+              onClick={() => {
+                void refetchApps();
+                void refetchPersonalLinks();
+                void refetchLinks();
+              }}
+            >
+              Retry
+            </Button>
+          </div>
         ) : null}
-
-        {!isLoading && !isError && !isMemberRolePending && !hasPageApps ? (
-          // An owner or admin can install an app: the four apps and Build
-          // your own. A member waits for one of them, unless an MCP app
-          // (below) is already theirs.
-          userCanManageApps ? (
-            <AppGallery
-              // With an MCP app already on, it is not the first app.
-              heading={
-                apps.length > 0 ? FIRST_SCREEN.addApp.dialogTitle : undefined
-              }
-              onPickApp={setPickedApp}
-              onBuild={() => setBuildOpen(true)}
-            />
-          ) : apps.length === 0 ? (
-            <EmptyState
-              icon={LayoutGrid}
-              title={FIRST_SCREEN.empty.memberTitle}
-              description={FIRST_SCREEN.empty.memberDescription}
-            />
-          ) : null
-        ) : null}
-
-        {personalLinksError ? (
-          <ErrorState
-            title="Failed to load personal links"
-            message="Please try again."
-            onRetry={() => void refetchPersonalLinks()}
-          />
-        ) : null}
-        {personalLinks ? (
-          <LauncherPersonalLinks
+        {!isLoading &&
+        !personalLinksPending &&
+        !linksPending &&
+        !isError &&
+        !personalLinksError &&
+        !linksError ? (
+          <LauncherView
             key={`${session.data?.user.id}:${session.data?.session.activeOrganizationId}`}
-            links={personalLinks.filter((link) =>
-              link.name.toLocaleLowerCase().includes(query),
-            )}
+            apps={apps}
+            personalLinks={personalLinks ?? []}
+            externalLinks={externalLinks ?? []}
+            preferences={preferences}
+            layout={layout}
+            saveStatus={saveStatus}
+            onUpdate={updateLauncher}
+            onOpenSetup={openSetup}
+            onUseMcp={setMcpApp}
           />
         ) : null}
-        {linksError ? (
-          <ErrorState
-            title="Failed to load external links"
-            message="Please try again."
-            onRetry={() => void refetchLinks()}
+        {!isLoading &&
+        !isError &&
+        !isMemberRolePending &&
+        userCanManageApps &&
+        apps.length === 0 ? (
+          <AppGallery
+            onPickApp={setPickedApp}
+            onBuild={() => setBuildOpen(true)}
           />
-        ) : null}
-        {externalLinks ? (
-          <ExternalLinkList
-            links={externalLinks.filter((link) =>
-              link.name.toLocaleLowerCase().includes(query),
-            )}
-          />
-        ) : null}
-        {!isLoading && !isError && mcpApps.length > 0 ? (
-          // Apps with no page, under the grid (or the gallery): the heading
-          // says once how they are used, so each card needs only a chip.
-          <section aria-label="MCP apps" className="space-y-3 pt-4">
-            <SectionHeader title="MCP apps" hint={MCP_APPS_HINT} />
-            <ul className={gridClassName}>{mcpApps.map(renderApp)}</ul>
-          </section>
         ) : null}
       </div>
       <PWAInstallModal
@@ -478,9 +247,6 @@ function App() {
         <AppSetupDialog
           name={setupApp.name}
           setup={setupApp.setup}
-          // An owner or admin runs the command for their own organization's
-          // app; a shared app of another organization is the platform's to
-          // set, optional settings included.
           canRun={
             userCanManageApps &&
             setupApp.organizationId ===

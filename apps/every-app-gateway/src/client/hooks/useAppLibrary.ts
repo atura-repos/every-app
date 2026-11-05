@@ -29,7 +29,11 @@ export enum AppLibraryLayout {
 
 type PreferenceOperation = {
   layout?: PortalPreferences["layout"];
+  collections?: PortalPreferences["collections"];
+  assignments?: PortalPreferences["assignments"];
   pins: { id: string; pinned: boolean }[];
+  pinOrder?: string[];
+  order?: string[];
   swap?: [movedId: string, neighborId: string, direction: -1 | 1];
 };
 
@@ -40,6 +44,22 @@ function preferenceOperation(
 ): PreferenceOperation {
   return {
     ...(before.layout !== after.layout ? { layout: after.layout } : {}),
+    ...(before.collections !== after.collections
+      ? { collections: after.collections }
+      : {}),
+    ...(before.assignments !== after.assignments
+      ? { assignments: after.assignments }
+      : {}),
+    // A launcher move has no legacy swap argument. Preserve its explicit intent
+    // for the conflict dialog, without overwriting unrelated remote fields.
+    ...(!swap && before.orderedIds.join("\0") !== after.orderedIds.join("\0")
+      ? { order: after.orderedIds }
+      : {}),
+    ...(before.pinnedIds.length === after.pinnedIds.length &&
+    before.pinnedIds.every((id) => after.pinnedIds.includes(id)) &&
+    before.pinnedIds.join("\0") !== after.pinnedIds.join("\0")
+      ? { pinOrder: after.pinnedIds }
+      : {}),
     pins: [...new Set([...before.pinnedIds, ...after.pinnedIds])]
       .filter(
         (id) => before.pinnedIds.includes(id) !== after.pinnedIds.includes(id),
@@ -78,9 +98,11 @@ function replayOperations(
     }
     return {
       ...current,
-      pinnedIds,
-      orderedIds,
+      pinnedIds: operation.pinOrder ?? pinnedIds,
+      orderedIds: operation.order ?? orderedIds,
       layout: operation.layout ?? current.layout,
+      collections: operation.collections ?? current.collections,
+      assignments: operation.assignments ?? current.assignments,
     };
   }, latest);
 }
@@ -95,6 +117,10 @@ export function useAppLibrary() {
   const key = ["portal-preferences", userId, orgId];
   const client = useQueryClient();
   const [conflictAccount, setConflictAccount] = useState("");
+  const [saveState, setSaveState] = useState<{
+    account: string;
+    status: "saving" | "saved" | "error" | "conflict";
+  } | null>(null);
   const conflictDraft = useRef<PreferenceOperation[] | null>(null);
   const identity =
     userId && orgId ? ["portal-preferences", userId, orgId] : null;
@@ -204,7 +230,12 @@ export function useAppLibrary() {
     (!preferencesQuery.isError &&
       (!preferencesQuery.isFetchedAfterMount || preferencesQuery.isFetching));
   const pinnedIds = useMemo(
-    () => new Set(preferences.pinnedIds),
+    () =>
+      new Set(
+        preferences.pinnedIds.map((id) =>
+          id.startsWith("managed:") ? id.slice(8) : id,
+        ),
+      ),
     [preferences.pinnedIds],
   );
   // Only sort authorized rows; a saved preference never reintroduces a revoked app.
@@ -212,8 +243,14 @@ export function useAppLibrary() {
     () =>
       isLoading || !authorized || preferencesQuery.isError
         ? []
-        : orderAuthorizedApps([...authorized], preferences),
-    [isLoading, authorized, preferences, preferencesQuery.isError],
+        : orderAuthorizedApps([...authorized], {
+            ...preferences,
+            pinnedIds: [...pinnedIds],
+            orderedIds: preferences.orderedIds
+              .map((id) => (id.startsWith("managed:") ? id.slice(8) : id))
+              .filter((id) => authorized.some((app) => app.id === id)),
+          }),
+    [isLoading, authorized, preferences, pinnedIds, preferencesQuery.isError],
   );
   const deploying = hasDeployingApp(apps);
   useEffect(() => {
@@ -245,6 +282,7 @@ export function useAppLibrary() {
     if (!queue.running) queue.confirmed = current;
     const next = change(current);
     if (next === current) return;
+    setSaveState({ account, status: "saving" });
     queue.operations.push(preferenceOperation(current, next, swap?.current));
     // An older read must not overwrite an optimistic edit while it saves.
     void client.cancelQueries({ queryKey: identity, exact: true });
@@ -263,6 +301,8 @@ export function useAppLibrary() {
               pinnedIds: value.pinnedIds,
               orderedIds: value.orderedIds,
               layout: value.layout,
+              collections: value.collections,
+              assignments: value.assignments,
               expectedRevision: queue.confirmed?.revision ?? 0,
             },
           });
@@ -275,19 +315,24 @@ export function useAppLibrary() {
             !queue.pending &&
             saves.current === queue &&
             currentAccount.current === account
-          )
+          ) {
             client.setQueryData(identity, queue.confirmed);
+            setSaveState({ account, status: "saved" });
+          }
         } catch (error) {
           if (getErrorCode(error) === "PORTAL_PREFERENCES_CONFLICT") {
             if (saves.current === queue && currentAccount.current === account) {
               conflictDraft.current = [...queue.operations];
               setConflictAccount(account);
+              setSaveState({ account, status: "conflict" });
             }
             queue.operations = [];
             queue.pending = null;
           } else {
             queue.operations.splice(0, sentOperations);
             toast.error("Could not save your app preferences.");
+            if (saves.current === queue && currentAccount.current === account)
+              setSaveState({ account, status: "error" });
           }
           if (
             queue.confirmed &&
@@ -323,6 +368,8 @@ export function useAppLibrary() {
             pinnedIds: merged.pinnedIds,
             orderedIds: merged.orderedIds,
             layout: merged.layout,
+            collections: merged.collections,
+            assignments: merged.assignments,
             expectedRevision: latest.revision ?? 0,
           },
         });
@@ -334,12 +381,15 @@ export function useAppLibrary() {
       if (currentAccount.current !== account || saves.current !== queue) return;
       conflictDraft.current = null;
       setConflictAccount("");
+      setSaveState(reapply ? { account, status: "saved" } : null);
     } catch (error) {
       if (getErrorCode(error) !== "PORTAL_PREFERENCES_CONFLICT")
         toast.error("Could not reload your app preferences.");
     }
   };
   return {
+    saveStatus:
+      saveState?.account === account ? saveState.status : ("" as const),
     conflict: conflictAccount === account && conflictDraft.current !== null,
     reloadConflict: () => resolveConflict(false),
     reapplyConflict: () => resolveConflict(true),
@@ -347,6 +397,8 @@ export function useAppLibrary() {
     isLoading,
     isError: appsQuery.isError || preferencesQuery.isError,
     pinnedIds,
+    preferences,
+    updateLauncher: update,
     pinnedApps: apps.filter((app) => pinnedIds.has(app.id)),
     layout: preferences.layout as AppLibraryLayout,
     setLayout: (layout: AppLibraryLayout) =>
