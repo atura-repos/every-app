@@ -8,6 +8,11 @@ on:
         description: 'Existing tag: atura-gateway-v<semver> (e.g. atura-gateway-v0.3.0-atura.1)'
         required: true
         type: string
+      staging_diagnostics:
+        description: 'STAGING ONLY: include settings diagnostics (default: off)'
+        required: true
+        default: false
+        type: boolean
 permissions:
   contents: write
 jobs:
@@ -20,10 +25,10 @@ jobs:
     steps:
       - name: Validate tag input
         run: |
-          case "$TAG" in
-            atura-gateway-v[0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo 'Expected atura-gateway-v<semver>' >&2; exit 1 ;;
-          esac
+          if [[ ! "$TAG" =~ ^atura-gateway-v[0-9]+\.[0-9]+\.[0-9]+-atura\.[0-9]+$ ]]; then
+            echo 'Expected an Atura prerelease tag: atura-gateway-v<major>.<minor>.<patch>-atura.<number>' >&2
+            exit 1
+          fi
       - name: Checkout the tagged source (full history for release ordering)
         uses: actions/checkout@v4
         with:
@@ -44,6 +49,8 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Build SDK, CLI, and Gateway
+        env:
+          ATURA_STAGE_DIAGNOSTICS: ${{ inputs.staging_diagnostics && 'true' || 'false' }}
         run: |
           pnpm -C packages/sdk build
           pnpm -C packages/cli build
@@ -53,10 +60,16 @@ jobs:
           pnpm types:check
           pnpm -C packages/cli test:built
       - name: Pack immutable release assets
+        env:
+          ATURA_STAGE_DIAGNOSTICS: ${{ inputs.staging_diagnostics && 'true' || 'false' }}
         run: |
           set -euo pipefail
           version="${TAG#atura-gateway-v}"
-          pnpm -C apps/every-app-gateway build:release -- --skip-build --version "$version"
+          if [[ "$ATURA_STAGE_DIAGNOSTICS" == true ]]; then
+            pnpm -C apps/every-app-gateway build:release -- --skip-build --version "$version" --staging-diagnostics
+          else
+            pnpm -C apps/every-app-gateway build:release -- --skip-build --version "$version"
+          fi
           mkdir -p release-assets
           cp apps/every-app-gateway/every-app-gateway-release.tar.gz release-assets/
           pnpm -C packages/cli pack --pack-destination "$GITHUB_WORKSPACE/release-assets"
@@ -64,12 +77,18 @@ jobs:
       - name: Publish only to Atura GitHub Releases
         env:
           GH_TOKEN: ${{ github.token }}
+          ATURA_STAGE_DIAGNOSTICS: ${{ inputs.staging_diagnostics && 'true' || 'false' }}
         run: |
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG exists; refusing to overwrite immutable assets" >&2
             exit 1
           fi
+          if [[ "$ATURA_STAGE_DIAGNOSTICS" == true ]]; then
+            notes="STAGING ONLY diagnostic build for https://stage-apps.atura.nl. NEVER deploy to production. release.json contains stagingOnly; this release's CLI refuses other Gateway hosts. Built from $GITHUB_SHA in atura-repos/every-app. This workflow never deploys to Cloudflare."
+          else
+            notes="Ordinary release without staging diagnostics. Built from $GITHUB_SHA in atura-repos/every-app. Deploy explicitly with the Atura checkout or Gateway tarball. This workflow never deploys to Cloudflare."
+          fi
           gh release create "$TAG" release-assets/* \
             --verify-tag --prerelease --title "Atura Gateway and CLI $TAG" \
-            --notes "Built from $GITHUB_SHA in atura-repos/every-app. Deploy explicitly with the Atura checkout or the Gateway tarball. This workflow never deploys to Cloudflare."
+            --notes "$notes"

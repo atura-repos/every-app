@@ -83,6 +83,22 @@ function repack(change: (dir: string) => void): void {
 }
 
 describe("openRelease", () => {
+  it("requires a staging-only marker for schema 2 and rejects it for schema 1", async () => {
+    const rewrite = (change: (manifest: any) => void) => repack((dir) => {
+      const file = path.join(dir, "release.json");
+      const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+      change(manifest);
+      fs.writeFileSync(file, JSON.stringify(manifest));
+    });
+    rewrite((m) => { m.schema = 2; });
+    await expect(openRelease(tarball)).rejects.toMatchObject({ code: "RELEASE_INVALID" });
+    rewrite((m) => { m.stagingOnly = { gatewayHost: "stage-apps.atura.nl", feature: "settings-diagnostics" }; });
+    const diagnostic = await openRelease(tarball);
+    expect(diagnostic.manifest.stagingOnly?.gatewayHost).toBe("stage-apps.atura.nl");
+    await diagnostic.cleanup();
+    rewrite((m) => { m.schema = 1; });
+    await expect(openRelease(tarball)).rejects.toMatchObject({ code: "RELEASE_INVALID" });
+  });
   it("opens a release the gateway's builder packed, and agrees on its hash", async () => {
     const builder = (await import(/* @vite-ignore */ BUILDER)) as Builder;
     const release = await openRelease(tarball);

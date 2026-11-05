@@ -147,6 +147,18 @@ function seedApps(
 }
 
 describe("applyGateway", () => {
+  it("rejects a diagnostic release on production before any release write", async () => {
+    Object.assign(release.manifest, { stagingOnly: { gatewayHost: "stage-apps.atura.nl", feature: "settings-diagnostics" } });
+    await expect(deployGateway({ gatewayHost: "apps.atura.nl" })).rejects.toMatchObject({ code: "RELEASE_TARGET_MISMATCH" });
+    expect(account.deploys).toHaveLength(0);
+    expect(await readInstall(cfD1Database(account.cf, [...account.databases][0]![0]))).toBeNull();
+  });
+
+  it("accepts the diagnostic release only at the exact staging host", async () => {
+    Object.assign(release.manifest, { stagingOnly: { gatewayHost: "stage-apps.atura.nl", feature: "settings-diagnostics" } });
+    await deployGateway({ gatewayHost: "stage-apps.atura.nl" });
+    expect(account.deploys).toHaveLength(1);
+  });
   it("installs a gateway: migrations first, then one upload with its secrets", async () => {
     const result = await deployGateway();
 
