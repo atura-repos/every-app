@@ -55,6 +55,7 @@ export function LauncherView({
   } | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [moveAnnouncement, setMoveAnnouncement] = useState("");
+  const filtered = Boolean(search || filter !== "all");
   const focusAfterMove = useRef<LauncherItem["key"] | null>(null);
   const viewRef = useRef<HTMLDivElement>(null);
 
@@ -70,6 +71,11 @@ export function LauncherView({
       focusAfterMove.current = null;
     }
   }, [preferences]);
+  useEffect(() => {
+    if (saveStatus === "conflict" || saveStatus === "error") {
+      setMoveAnnouncement("");
+    }
+  }, [saveStatus]);
   useEffect(
     () => () => {
       drag.current = null;
@@ -184,7 +190,7 @@ export function LauncherView({
     event: ReactPointerEvent<HTMLButtonElement>,
     item: LauncherItem,
   ) => {
-    if (event.button !== 0 || saveStatus === "conflict") return;
+    if (event.button !== 0 || saveStatus === "conflict" || filtered) return;
     drag.current = {
       pointerId: event.pointerId,
       key: item.key,
@@ -247,7 +253,7 @@ export function LauncherView({
           </button>
         )}
         <label>
-          Collection for {item.name}{" "}
+          Tap to move {item.name} to a collection (or use a keyboard){" "}
           <select
             aria-label={`Collection for ${item.name}`}
             value={collection}
@@ -267,6 +273,7 @@ export function LauncherView({
           data-drag-key={item.key}
           aria-label={`Drag ${item.name} to a collection`}
           aria-describedby="collection-drag-help"
+          disabled={filtered || saveStatus === "conflict"}
           onPointerDown={(e) => startDrag(e, item)}
           onPointerMove={moveDrag}
           onPointerUp={(e) => endDrag(e, item)}
@@ -274,7 +281,7 @@ export function LauncherView({
             drag.current = null;
             setDropTarget(null);
           }}
-          className="min-h-11 rounded border px-2 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 touch-none select-none motion-reduce:transition-none"
+          className="min-h-11 rounded border px-2 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 touch-none select-none disabled:opacity-50 motion-reduce:transition-none"
         >
           Drag {item.name}
         </button>
@@ -431,8 +438,9 @@ export function LauncherView({
         {saveStatus === "error" ? " · Could not save layout" : ""}
       </p>
       <p id="collection-drag-help" className="text-xs text-muted-foreground">
-        Drag a shortcut by its handle to a collection or Other. Use its
-        Collection menu instead with a keyboard.
+        {filtered
+          ? "In results, clear search and filters to drag to a collection, or use the Collection menu to move now."
+          : "Drag a shortcut by its handle to a visible collection or Other. On touch, tap its Collection menu to reach destinations offscreen; the menu also works with a keyboard."}
       </p>
       <p role="status" aria-live="polite">
         {saveStatus === "conflict" || saveStatus === "error"
