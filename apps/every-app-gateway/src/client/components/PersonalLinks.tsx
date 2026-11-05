@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useSession } from "@/client/hooks/useSession";
 import {
   createPersonalLink,
   updatePersonalLink,
@@ -13,11 +12,14 @@ import { PersonalLinkList, type PersonalLink } from "./PersonalLinkList";
 export function PersonalLinks({
   links,
   showList = true,
+  userId,
+  orgId,
 }: {
   links: PersonalLink[];
   showList?: boolean;
+  userId: string;
+  orgId: string;
 }) {
-  const { data: session } = useSession();
   const client = useQueryClient();
   const [editing, setEditing] = useState<PersonalLink | null>(null);
   const [name, setName] = useState("");
@@ -38,11 +40,7 @@ export function PersonalLinks({
   };
   const refresh = () =>
     client.invalidateQueries({
-      queryKey: [
-        "personal-links",
-        session?.user.id,
-        session?.session.activeOrganizationId,
-      ],
+      queryKey: ["personal-links", userId, orgId],
     });
   const submit = async (event: FormEvent) => {
     event.preventDefault();

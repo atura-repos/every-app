@@ -76,6 +76,8 @@ function SettingsPage() {
             key={`${session?.user.id}:${session?.session.activeOrganizationId}`}
             links={links ?? []}
             showList={Boolean(links)}
+            userId={session!.user.id}
+            orgId={session!.session.activeOrganizationId!}
           />
         ) : null}
         {identityReady && links?.length === 0 ? (
