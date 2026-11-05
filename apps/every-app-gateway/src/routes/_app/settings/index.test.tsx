@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   setLayout: vi.fn(),
   linksError: false,
   layoutLoading: false,
+  conflict: false,
   validated: true,
   sessionError: false,
   links: [{ id: "link-1", name: "My docs", url: "https://example.org/" }] as
@@ -50,6 +51,18 @@ vi.mock("@/client/hooks/useAppLibrary", () => ({
     setLayout: mocks.setLayout,
     isLoading: mocks.layoutLoading,
     isError: false,
+    preferences: {
+      pinnedIds: [],
+      orderedIds: [],
+      layout: "grid",
+      collections: [{ id: "c1", name: "Work" }],
+      assignments: {},
+    },
+    updateLauncher: vi.fn(),
+    saveStatus: "",
+    conflict: mocks.conflict,
+    reloadConflict: vi.fn(),
+    reapplyConflict: vi.fn(),
   }),
 }));
 import { Route } from "./index";
@@ -72,11 +85,26 @@ it("gives a regular member a personal settings hub separate from workspace admin
   expect(html).toContain("My docs");
   expect(html).toContain("Grid view");
   expect(html).toContain("List view");
+  expect(html).toContain("Add collection");
+  expect(html).toContain("Reset layout");
+
   expect(html).toContain("Theme");
   expect(html).toContain("System");
   expect(html).toContain('href="/settings/accounts"');
   expect(html).toContain('href="/settings/connections"');
   expect(html).not.toContain("Manage workspace");
+});
+
+it("offers reload and reapply controls for a settings write conflict", () => {
+  mocks.conflict = true;
+  try {
+    const html = renderSettings();
+    expect(html).toContain("Layout changed in another browser");
+    expect(html).toContain("Load latest layout");
+    expect(html).toContain("Reapply my change");
+  } finally {
+    mocks.conflict = false;
+  }
 });
 
 it("keeps the member's add-link entry point visible when listing links fails", () => {
