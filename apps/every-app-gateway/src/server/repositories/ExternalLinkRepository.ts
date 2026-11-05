@@ -1,5 +1,10 @@
 import { and, asc, eq, exists, or, sql, inArray } from "drizzle-orm";
 import { db } from "@/db";
+import {
+  organizationExternalLinkCreateSchema,
+  externalLinkUpdateSchema,
+  validateOrganizationUrl,
+} from "@/schemas/externalLink";
 import { liveUser } from "./OrganizationMembersRepository";
 import {
   externalLinks,
@@ -204,18 +209,16 @@ async function create(data: {
   organizationId: string;
   name: string;
   url: string;
-  access?: Access;
+  access: Access;
 }) {
-  const access = await validateAccess(
-    data.organizationId,
-    data.access ?? { everyone: true, userIds: [], groupIds: [] },
-  );
+  const checked = organizationExternalLinkCreateSchema.parse(data);
+  const access = await validateAccess(data.organizationId, checked.access);
   const now = new Date();
   const row = {
     id: data.id,
     organizationId: data.organizationId,
     name: data.name,
-    url: data.url,
+    url: checked.url,
     everyone: access.everyone,
     createdAt: now,
     updatedAt: now,
@@ -230,17 +233,32 @@ async function create(data: {
 async function update(
   organizationId: string,
   id: string,
-  data: { name: string; url: string; access?: Access },
+  data: {
+    name: string;
+    url: string;
+    access?: Access;
+    confirmedHostname: string;
+  },
 ) {
   const current = await access(organizationId, id);
   if (!current) return undefined;
+  externalLinkUpdateSchema.parse({ ...data, id });
+  const [existing] = await db
+    .select({ url: externalLinks.url })
+    .from(externalLinks)
+    .where(scoped(organizationId, id));
+  if (!existing) return undefined;
+  const url =
+    data.url === existing.url
+      ? existing.url
+      : validateOrganizationUrl(data.url);
   const next = await validateAccess(organizationId, data.access ?? current);
   await db.batch([
     db
       .update(externalLinks)
       .set({
         name: data.name,
-        url: data.url,
+        url,
         everyone: next.everyone,
         updatedAt: new Date(),
       })

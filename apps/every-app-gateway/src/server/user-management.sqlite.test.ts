@@ -46,7 +46,10 @@ import {
   users,
 } from "@/db/schema";
 import { createProdAuthenticator } from "@/perimeter/betterAuthAuthenticator";
-import { clearOrgContextCacheForTests } from "@/server/organization/orgContext";
+import {
+  clearOrgContextCacheForTests,
+  resolveOrgContext,
+} from "@/server/organization/orgContext";
 import { OrganizationMembersRepository } from "@/server/repositories/OrganizationMembersRepository";
 import { UserRepository } from "@/server/repositories/UserRepository";
 import { AdminService } from "@/server/services/AdminService";
@@ -144,6 +147,19 @@ describe("user management (SQLite)", () => {
       await AppAccessService.grantDefaultAppsToUser(newcomer, org);
       expect(await visibleTo(newcomer)).toEqual(["todo"]);
     });
+  });
+
+  it("direct org API authorization reads the downgraded or removed membership on each request", async () => {
+    const input = { userId: admin, activeOrganizationId: org };
+    expect((await resolveOrgContext(input))?.role).toBe("admin");
+    // A write from another isolate does not call forgetOrgContext here.
+    await db
+      .update(members)
+      .set({ role: "member" })
+      .where(eq(members.userId, admin));
+    expect((await resolveOrgContext(input))?.role).toBe("member");
+    await db.delete(members).where(eq(members.userId, admin));
+    await expect(resolveOrgContext(input)).resolves.toBeNull();
   });
 
   describe("roles", () => {

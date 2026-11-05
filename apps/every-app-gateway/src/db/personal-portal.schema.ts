@@ -40,6 +40,7 @@ export const portalPreferences = sqliteTable(
       .$type<string[]>()
       .notNull(),
     layout: text("layout", { enum: ["grid", "list"] }).notNull(),
+    revision: integer("revision").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.organizationId, t.userId] })],
 );

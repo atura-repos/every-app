@@ -22,6 +22,7 @@ describe("external links stay inside the active organization", () => {
     await ExternalLinkService.create(org, {
       name: "Risk",
       url: "https://example.org/",
+      access: { everyone: true, userIds: [], groupIds: [] },
     });
     expect(repo.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -38,6 +39,7 @@ describe("external links stay inside the active organization", () => {
         id: crypto.randomUUID(),
         name: "X",
         url: "https://example.org/",
+        confirmedHostname: "example.org",
       }),
     ).rejects.toThrow("External link not found");
     expect(repo.update).toHaveBeenCalledWith(

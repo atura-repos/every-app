@@ -37,7 +37,7 @@ const link = (access?: {
   ExternalLinkService.create(ctx(owner, org, "owner"), {
     name: "Risk",
     url: "https://example.org/",
-    ...(access ? { access } : {}),
+    access: access ?? { everyone: true, userIds: [], groupIds: [] },
   });
 
 beforeEach(async () => {
@@ -99,6 +99,7 @@ describe("external-link visibility on migrated SQLite", () => {
       name: "Risk",
       url: "https://example.org/",
       access: { everyone: false, userIds: [], groupIds: [] },
+      confirmedHostname: "example.org",
     });
     expect(await ExternalLinkService.list(ctx(user))).toEqual([]);
   });

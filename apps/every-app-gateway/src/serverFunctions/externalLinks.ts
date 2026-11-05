@@ -5,7 +5,7 @@ import {
 } from "@/middleware/auth";
 import { publicErrorMiddleware } from "@/middleware/publicError";
 import {
-  externalLinkFormSchema,
+  organizationExternalLinkCreateSchema,
   externalLinkUpdateSchema,
   externalLinkDeleteSchema,
 } from "@/schemas/externalLink";
@@ -28,7 +28,9 @@ export const getExternalLinkAccess = createServerFn()
 
 export const createExternalLink = createServerFn({ method: "POST" })
   .middleware([publicErrorMiddleware, organizationAdminMiddleware])
-  .validator((data: unknown) => externalLinkFormSchema.parse(data))
+  .validator((data: unknown) =>
+    organizationExternalLinkCreateSchema.parse(data),
+  )
   .handler(async ({ context, data }) =>
     ExternalLinkService.create(context.org, data),
   );

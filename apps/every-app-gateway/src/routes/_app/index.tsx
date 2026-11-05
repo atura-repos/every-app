@@ -104,7 +104,19 @@ function App() {
     togglePin,
     setLayout,
     moveApp,
+    conflict,
+    reloadConflict,
+    reapplyConflict,
   } = useAppLibrary();
+  // The selection is only an id; metadata and authorization must come from
+  // the currently validated library, never the object saved when it opened.
+  const selectedMcpApp =
+    !isLoading && !isError && mcpApp
+      ? apps.find((app) => app.id === mcpApp.id && isMcpApp(app))
+      : undefined;
+  useEffect(() => {
+    if (mcpApp && !selectedMcpApp) setMcpApp(null);
+  }, [mcpApp, selectedMcpApp]);
   const {
     data: personalLinks,
     isError: personalLinksError,
@@ -254,6 +266,25 @@ function App() {
             ) : null
           }
         />
+        {conflict ? (
+          <div
+            role="alert"
+            className="rounded-md border border-destructive p-4"
+          >
+            <p>
+              Layout changed in another browser. Your unsaved change was not
+              applied.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => void reloadConflict()}>
+                Load latest layout
+              </Button>
+              <Button variant="outline" onClick={() => void reapplyConflict()}>
+                Reapply my change
+              </Button>
+            </div>
+          </div>
+        ) : null}
         {isError ? (
           <ErrorState title="Failed to load apps" message="Please try again." />
         ) : null}
@@ -402,7 +433,7 @@ function App() {
           <LauncherPersonalLinks
             key={`${session.data?.user.id}:${session.data?.session.activeOrganizationId}`}
             links={personalLinks.filter((link) =>
-              `${link.name} ${link.url}`.toLocaleLowerCase().includes(query),
+              link.name.toLocaleLowerCase().includes(query),
             )}
           />
         ) : null}
@@ -416,7 +447,7 @@ function App() {
         {externalLinks ? (
           <ExternalLinkList
             links={externalLinks.filter((link) =>
-              `${link.name} ${link.url}`.toLocaleLowerCase().includes(query),
+              link.name.toLocaleLowerCase().includes(query),
             )}
           />
         ) : null}
@@ -458,10 +489,10 @@ function App() {
           onClose={closeSetup}
         />
       ) : null}
-      {mcpApp ? (
+      {selectedMcpApp ? (
         <McpAppDialog
-          name={mcpApp.name}
-          appId={mcpApp.appId}
+          name={selectedMcpApp.name}
+          appId={selectedMcpApp.appId}
           onClose={() => setMcpApp(null)}
         />
       ) : null}

@@ -1,0 +1,1 @@
+ALTER TABLE `portal_preferences` ADD `revision` integer DEFAULT 0 NOT NULL;
