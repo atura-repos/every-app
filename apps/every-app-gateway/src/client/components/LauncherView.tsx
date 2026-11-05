@@ -1,4 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { Bookmark, Link2, Pin, PinOff, ArrowUpRight } from "lucide-react";
 import { AppListItem } from "./AppListItem";
 import { AppLibraryLayout } from "@/client/hooks/useAppLibrary";
@@ -41,6 +46,42 @@ export function LauncherView({
   const [search, setSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState<"all" | "pinned" | LauncherKind>("all");
+  const drag = useRef<{
+    pointerId: number;
+    key: LauncherItem["key"];
+    x: number;
+    y: number;
+    active: boolean;
+  } | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [moveAnnouncement, setMoveAnnouncement] = useState("");
+  const filtered = Boolean(search || filter !== "all");
+  const focusAfterMove = useRef<LauncherItem["key"] | null>(null);
+  const viewRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!focusAfterMove.current) return;
+    const handle = [
+      ...(viewRef.current?.querySelectorAll<HTMLButtonElement>(
+        "[data-drag-key]",
+      ) ?? []),
+    ].find((button) => button.dataset.dragKey === focusAfterMove.current);
+    if (handle) {
+      handle.focus();
+      focusAfterMove.current = null;
+    }
+  }, [preferences]);
+  useEffect(() => {
+    if (saveStatus === "conflict" || saveStatus === "error") {
+      setMoveAnnouncement("");
+    }
+  }, [saveStatus]);
+  useEffect(
+    () => () => {
+      drag.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
@@ -121,6 +162,13 @@ export function LauncherView({
   const assign = (item: LauncherItem, collectionId: string) =>
     update(
       (current) => {
+        if (
+          collectionId &&
+          !current.collections?.some((c) => c.id === collectionId)
+        )
+          return current;
+        if ((current.assignments?.[item.key] ?? "") === collectionId)
+          return current;
         const assignments = { ...current.assignments };
         if (collectionId) assignments[item.key] = collectionId;
         else delete assignments[item.key];
@@ -128,6 +176,61 @@ export function LauncherView({
       },
       `${item.name} moved to ${collectionId ? "collection" : "Other"}`,
     );
+  const destinationAt = (x: number, y: number) => {
+    const target = document
+      .elementFromPoint(x, y)
+      ?.closest<HTMLElement>("[data-drop-collection]");
+    const id = target?.dataset.dropCollection;
+    return id !== undefined &&
+      (id === "" || preferences.collections?.some((c) => c.id === id))
+      ? id
+      : null;
+  };
+  const startDrag = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    item: LauncherItem,
+  ) => {
+    if (event.button !== 0 || saveStatus === "conflict" || filtered) return;
+    drag.current = {
+      pointerId: event.pointerId,
+      key: item.key,
+      x: event.clientX,
+      y: event.clientY,
+      active: false,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+  const moveDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const current = drag.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    if (
+      !current.active &&
+      Math.hypot(event.clientX - current.x, event.clientY - current.y) < 8
+    )
+      return;
+    current.active = true;
+    event.preventDefault();
+    setDropTarget(destinationAt(event.clientX, event.clientY));
+  };
+  const endDrag = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    item: LauncherItem,
+  ) => {
+    const current = drag.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    drag.current = null;
+    setDropTarget(null);
+    if (!current.active || current.key !== item.key) return;
+    event.preventDefault();
+    const id = destinationAt(event.clientX, event.clientY);
+    if (id === null || (preferences.assignments?.[item.key] ?? "") === id)
+      return;
+    focusAfterMove.current = item.key;
+    assign(item, id);
+    setMoveAnnouncement(
+      `${item.name} moved to ${id ? preferences.collections?.find((c) => c.id === id)?.name : "Other"}`,
+    );
+  };
   const render = (item: LauncherItem, section: LauncherItem[]) => {
     const app =
       item.kind === "managed" ? apps.find((x) => x.id === item.id) : undefined;
@@ -150,7 +253,7 @@ export function LauncherView({
           </button>
         )}
         <label>
-          Collection for {item.name}{" "}
+          Tap to move {item.name} to a collection (or use a keyboard){" "}
           <select
             aria-label={`Collection for ${item.name}`}
             value={collection}
@@ -165,6 +268,23 @@ export function LauncherView({
             ))}
           </select>
         </label>
+        <button
+          type="button"
+          data-drag-key={item.key}
+          aria-label={`Drag ${item.name} to a collection`}
+          aria-describedby="collection-drag-help"
+          disabled={filtered || saveStatus === "conflict"}
+          onPointerDown={(e) => startDrag(e, item)}
+          onPointerMove={moveDrag}
+          onPointerUp={(e) => endDrag(e, item)}
+          onPointerCancel={() => {
+            drag.current = null;
+            setDropTarget(null);
+          }}
+          className="min-h-11 rounded border px-2 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 touch-none select-none disabled:opacity-50 motion-reduce:transition-none"
+        >
+          Drag {item.name}
+        </button>
         {!app && (
           <>
             <button
@@ -237,7 +357,7 @@ export function LauncherView({
     );
   };
   return (
-    <div className="space-y-4">
+    <div ref={viewRef} className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <a
           href="/settings#add-personal-link"
@@ -317,6 +437,16 @@ export function LauncherView({
           : ""}
         {saveStatus === "error" ? " · Could not save layout" : ""}
       </p>
+      <p id="collection-drag-help" className="text-xs text-muted-foreground">
+        {filtered
+          ? "In results, clear search and filters to drag to a collection, or use the Collection menu to move now."
+          : "Drag a shortcut by its handle to a visible collection or Other. On touch, tap its Collection menu to reach destinations offscreen; the menu also works with a keyboard."}
+      </p>
+      <p role="status" aria-live="polite">
+        {saveStatus === "conflict" || saveStatus === "error"
+          ? ""
+          : moveAnnouncement}
+      </p>
       {projected.count === 0 && (
         <p>{search || filter !== "all" ? "No results" : "No items yet"}</p>
       )}
@@ -324,7 +454,14 @@ export function LauncherView({
         <section
           key={section.id}
           aria-label={section.name}
-          className="space-y-2"
+          data-drop-collection={
+            section.id === "other"
+              ? ""
+              : section.id === "pinned" || section.id === "results"
+                ? undefined
+                : section.id
+          }
+          className={`space-y-2 rounded-lg ${dropTarget !== null && dropTarget === (section.id === "other" ? "" : section.id) && section.id !== "pinned" && section.id !== "results" ? "outline-2 outline-offset-2 outline-primary" : ""}`}
         >
           <h2 className="text-lg font-semibold">{section.name}</h2>
           {section.items.length ? (
