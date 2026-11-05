@@ -4,6 +4,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const mocks = vi.hoisted(() => ({
   setLayout: vi.fn(),
+  linksError: false,
+  layoutLoading: false,
+  validated: true,
+  sessionError: false,
+  links: [{ id: "link-1", name: "My docs", url: "https://example.org/" }] as
+    | { id: string; name: string; url: string }[]
+    | undefined,
   session: {
     user: { id: "member-1", email: "member@atura.nl" },
     session: { activeOrganizationId: "org-1" },
@@ -16,7 +23,13 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 vi.mock("@/client/hooks/useSession", () => ({
-  useSession: () => ({ data: mocks.session }),
+  useSession: () => ({
+    data: mocks.session,
+    isFetchedAfterMount: mocks.validated,
+    isFetching: false,
+    error: mocks.sessionError ? new Error("offline") : null,
+    refetch: vi.fn(),
+  }),
 }));
 vi.mock("@/client/components/PersonalLinks", () => ({
   PersonalLinks: ({ links }: { links: { name: string }[] }) => (
@@ -25,8 +38,9 @@ vi.mock("@/client/components/PersonalLinks", () => ({
 }));
 vi.mock("@/client/hooks/usePersonalLinks", () => ({
   usePersonalLinks: () => ({
-    data: [{ id: "link-1", name: "My docs", url: "https://example.org/" }],
-    isError: false,
+    data: mocks.links,
+    isError: mocks.linksError,
+    refetch: vi.fn(),
   }),
 }));
 vi.mock("@/client/hooks/useAppLibrary", () => ({
@@ -34,21 +48,25 @@ vi.mock("@/client/hooks/useAppLibrary", () => ({
   useAppLibrary: () => ({
     layout: "grid",
     setLayout: mocks.setLayout,
-    isLoading: false,
+    isLoading: mocks.layoutLoading,
     isError: false,
   }),
 }));
 import { Route } from "./index";
 
-it("gives a regular member a personal settings hub separate from workspace administration", () => {
+function renderSettings() {
   const Page = (
     Route as unknown as { options: { component: React.ComponentType } }
   ).options.component;
-  const html = renderToStaticMarkup(
+  return renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
       <Page />
     </QueryClientProvider>,
   );
+}
+
+it("gives a regular member a personal settings hub separate from workspace administration", () => {
+  const html = renderSettings();
   expect(html).toContain("Personal settings");
   expect(html).toContain("Add a personal link");
   expect(html).toContain("My docs");
@@ -59,4 +77,77 @@ it("gives a regular member a personal settings hub separate from workspace admin
   expect(html).toContain('href="/settings/accounts"');
   expect(html).toContain('href="/settings/connections"');
   expect(html).not.toContain("Manage workspace");
+});
+
+it("keeps the member's add-link entry point visible when listing links fails", () => {
+  mocks.links = undefined;
+  mocks.linksError = true;
+  try {
+    const html = renderSettings();
+    expect(html).toContain("Failed to load personal links");
+    expect(html).toContain("Add a personal link");
+  } finally {
+    mocks.links = [
+      { id: "link-1", name: "My docs", url: "https://example.org/" },
+    ];
+    mocks.linksError = false;
+  }
+});
+
+it("does not silently erase the add-link path while session validation waits", () => {
+  mocks.links = undefined;
+  mocks.layoutLoading = true;
+  mocks.validated = false;
+  try {
+    const html = renderSettings();
+    expect(html).toContain("Personal links");
+    expect(html).not.toContain("Failed to load personal links");
+    expect(html).toContain("disabled");
+    expect(html).toContain('role="status"');
+  } finally {
+    mocks.links = [
+      { id: "link-1", name: "My docs", url: "https://example.org/" },
+    ];
+    mocks.layoutLoading = false;
+    mocks.validated = true;
+  }
+});
+
+it("allows an authenticated member to add when their link list is empty", () => {
+  mocks.links = [];
+  try {
+    const html = renderSettings();
+    expect(html).toContain("Add a personal link");
+    expect(html).toContain("No personal links yet");
+  } finally {
+    mocks.links = [
+      { id: "link-1", name: "My docs", url: "https://example.org/" },
+    ];
+  }
+});
+
+it("shows a retryable session error instead of a permanent loading state", () => {
+  mocks.validated = false;
+  mocks.sessionError = true;
+  try {
+    const html = renderSettings();
+    expect(html).toContain("Could not verify your workspace");
+    expect(html).not.toContain("Add a personal link");
+    expect(html).not.toContain("Checking your workspace");
+  } finally {
+    mocks.validated = true;
+    mocks.sessionError = false;
+  }
+});
+
+it("explains when no workspace is selected without mounting the form", () => {
+  const previous = mocks.session.session.activeOrganizationId;
+  mocks.session.session.activeOrganizationId = "";
+  try {
+    const html = renderSettings();
+    expect(html).toContain("Select a workspace");
+    expect(html).not.toContain("Add a personal link");
+  } finally {
+    mocks.session.session.activeOrganizationId = previous;
+  }
 });

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useSession } from "@/client/hooks/useSession";
@@ -10,7 +10,13 @@ import {
 import { personalLinkFormSchema } from "@/schemas/personalPortal";
 import { PersonalLinkList, type PersonalLink } from "./PersonalLinkList";
 
-export function PersonalLinks({ links }: { links: PersonalLink[] }) {
+export function PersonalLinks({
+  links,
+  showList = true,
+}: {
+  links: PersonalLink[];
+  showList?: boolean;
+}) {
   const { data: session } = useSession();
   const client = useQueryClient();
   const [editing, setEditing] = useState<PersonalLink | null>(null);
@@ -18,6 +24,12 @@ export function PersonalLinks({ links }: { links: PersonalLink[] }) {
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const nameInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (window.location.hash === "#add-personal-link") {
+      nameInput.current?.focus();
+    }
+  }, []);
   const reset = () => {
     setEditing(null);
     setName("");
@@ -68,6 +80,7 @@ export function PersonalLinks({ links }: { links: PersonalLink[] }) {
   return (
     <div className="space-y-3">
       <section
+        id="add-personal-link"
         aria-label="Add a personal link"
         className="rounded-xl border bg-card p-4"
       >
@@ -83,6 +96,7 @@ export function PersonalLinks({ links }: { links: PersonalLink[] }) {
           className="mt-3 flex flex-wrap gap-2"
         >
           <input
+            ref={nameInput}
             aria-label="Link name"
             placeholder="Name"
             className="rounded border bg-background p-2"
@@ -116,16 +130,18 @@ export function PersonalLinks({ links }: { links: PersonalLink[] }) {
           </p>
         )}
       </section>
-      <PersonalLinkList
-        links={links}
-        onEdit={(link) => {
-          setEditing(link);
-          setName(link.name);
-          setUrl(link.url);
-          setError("");
-        }}
-        onDelete={(link) => void remove(link)}
-      />
+      {showList && (
+        <PersonalLinkList
+          links={links}
+          onEdit={(link) => {
+            setEditing(link);
+            setName(link.name);
+            setUrl(link.url);
+            setError("");
+          }}
+          onDelete={(link) => void remove(link)}
+        />
+      )}
     </div>
   );
 }

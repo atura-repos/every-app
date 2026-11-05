@@ -245,9 +245,12 @@ export function LauncherView({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <Link to="/settings" className="rounded border px-3 py-2 text-sm">
+        <a
+          href="/settings#add-personal-link"
+          className="rounded border px-3 py-2 text-sm"
+        >
           Add my own link
-        </Link>
+        </a>
         <span className="text-sm text-muted-foreground">
           Only for me in this workspace
         </span>

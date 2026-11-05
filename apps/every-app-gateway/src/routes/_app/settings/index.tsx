@@ -16,8 +16,16 @@ export const Route = createFileRoute("/_app/settings/")({
 });
 
 function SettingsPage() {
-  const { data: session } = useSession();
+  const sessionQuery = useSession();
+  const session = sessionQuery.data;
   const { data: links, isError: linksError, refetch } = usePersonalLinks();
+  const identityReady = Boolean(
+    sessionQuery.isFetchedAfterMount &&
+      !sessionQuery.isFetching &&
+      !sessionQuery.error &&
+      session?.user.id &&
+      session.session.activeOrganizationId,
+  );
   const {
     layout,
     setLayout,
@@ -32,18 +40,40 @@ function SettingsPage() {
       />
       <section className="space-y-3" aria-label="Personal links settings">
         <SectionHeader title="Personal links" />
-        {linksError ? (
+        {sessionQuery.error ? (
+          <ErrorState
+            title="Could not verify your workspace"
+            message="Please try again before managing personal links."
+            onRetry={() => sessionQuery.refetch()}
+          />
+        ) : sessionQuery.isFetchedAfterMount &&
+          !sessionQuery.isFetching &&
+          !session?.session.activeOrganizationId ? (
+          <p role="status">Select a workspace to manage personal links.</p>
+        ) : !identityReady ? (
+          <p role="status">
+            Checking your workspace before loading personal links…
+          </p>
+        ) : null}
+        {identityReady && linksError ? (
           <ErrorState
             title="Failed to load personal links"
-            message="Please try again."
+            message="Your links could not be listed. You can still add a link or try again."
             onRetry={() => void refetch()}
           />
         ) : null}
-        {links && session?.session.activeOrganizationId ? (
+        {identityReady && !links && !linksError ? (
+          <p role="status">Loading personal links…</p>
+        ) : null}
+        {identityReady ? (
           <PersonalLinks
-            key={`${session.user.id}:${session.session.activeOrganizationId}`}
-            links={links}
+            key={`${session?.user.id}:${session?.session.activeOrganizationId}`}
+            links={links ?? []}
+            showList={Boolean(links)}
           />
+        ) : null}
+        {identityReady && links?.length === 0 ? (
+          <p>No personal links yet. Add your first link above.</p>
         ) : null}
       </section>
       <section className="space-y-3" aria-label="Home page settings">
