@@ -104,6 +104,27 @@ describe("personal portal server boundary", () => {
       expect.objectContaining({ name: "Docs" }),
     );
   });
+  it("requires an explicit nonnegative revision and never forwards an unversioned write", () => {
+    const save = asFn(savePortalPreferences);
+    for (const revision of [undefined, -1, 1.5, "1"]) {
+      expect(() =>
+        save.validate({
+          pinnedIds: [],
+          orderedIds: [],
+          layout: "grid",
+          expectedRevision: revision,
+        }),
+      ).toThrow();
+    }
+    expect(
+      save.validate({
+        pinnedIds: [],
+        orderedIds: [],
+        layout: "grid",
+        expectedRevision: 0,
+      }),
+    ).toMatchObject({ expectedRevision: 0 });
+  });
   it("rejects unsafe URLs and excessive preference ids at the boundary", () => {
     expect(() =>
       asFn(createPersonalLink).validate({

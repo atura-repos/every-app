@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { PersonalLinks } from "@/client/components/PersonalLinks";
+import { WorkspaceLayoutSettings } from "@/client/components/WorkspaceLayoutSettings";
 import { ThemePreferenceRadio } from "@/client/components/ThemePreferenceMenuItems";
 import {
   Page,
@@ -7,7 +8,7 @@ import {
   SectionHeader,
 } from "@/client/components/PageHeader";
 import { ErrorState } from "@/client/components/ErrorState";
-import { AppLibraryLayout, useAppLibrary } from "@/client/hooks/useAppLibrary";
+import { useAppLibrary } from "@/client/hooks/useAppLibrary";
 import { usePersonalLinks } from "@/client/hooks/usePersonalLinks";
 import { useSession } from "@/client/hooks/useSession";
 
@@ -16,11 +17,24 @@ export const Route = createFileRoute("/_app/settings/")({
 });
 
 function SettingsPage() {
-  const { data: session } = useSession();
+  const sessionQuery = useSession();
+  const session = sessionQuery.data;
   const { data: links, isError: linksError, refetch } = usePersonalLinks();
+  const identityReady = Boolean(
+    sessionQuery.isFetchedAfterMount &&
+      !sessionQuery.isFetching &&
+      !sessionQuery.error &&
+      session?.user.id &&
+      session.session.activeOrganizationId,
+  );
   const {
     layout,
-    setLayout,
+    preferences,
+    updateLauncher,
+    saveStatus,
+    conflict,
+    reloadConflict,
+    reapplyConflict,
     isLoading: layoutLoading,
     isError: layoutError,
   } = useAppLibrary();
@@ -32,21 +46,47 @@ function SettingsPage() {
       />
       <section className="space-y-3" aria-label="Personal links settings">
         <SectionHeader title="Personal links" />
-        {linksError ? (
+        {sessionQuery.error ? (
+          <ErrorState
+            title="Could not verify your workspace"
+            message="Please try again before managing personal links."
+            onRetry={() => sessionQuery.refetch()}
+          />
+        ) : sessionQuery.isFetchedAfterMount &&
+          !sessionQuery.isFetching &&
+          !session?.session.activeOrganizationId ? (
+          <p role="status">Select a workspace to manage personal links.</p>
+        ) : !identityReady ? (
+          <p role="status">
+            Checking your workspace before loading personal links…
+          </p>
+        ) : null}
+        {identityReady && linksError ? (
           <ErrorState
             title="Failed to load personal links"
-            message="Please try again."
+            message="Your links could not be listed. You can still add a link or try again."
             onRetry={() => void refetch()}
           />
         ) : null}
-        {links && session?.session.activeOrganizationId ? (
+        {identityReady && !links && !linksError ? (
+          <p role="status">Loading personal links…</p>
+        ) : null}
+        {identityReady ? (
           <PersonalLinks
-            key={`${session.user.id}:${session.session.activeOrganizationId}`}
-            links={links}
+            key={`${session?.user.id}:${session?.session.activeOrganizationId}`}
+            links={links ?? []}
+            showList={Boolean(links)}
           />
         ) : null}
+        {identityReady && links?.length === 0 ? (
+          <p>No personal links yet. Add your first link above.</p>
+        ) : null}
       </section>
-      <section className="space-y-3" aria-label="Home page settings">
+      <section
+        id="home-layout"
+        className="space-y-3 scroll-mt-6"
+        aria-label="Home page settings"
+      >
         <SectionHeader title="Home page" />
         <p className="text-sm text-muted-foreground">
           Choose how your apps appear in this workspace. Pin and reorder apps on
@@ -55,26 +95,44 @@ function SettingsPage() {
         {layoutError ? (
           <p role="alert">Could not load your display preference.</p>
         ) : null}
-        <div className="flex gap-2" role="group" aria-label="App layout">
-          <button
-            type="button"
-            className="rounded border px-3 py-2"
-            disabled={layoutLoading || layoutError}
-            aria-pressed={layout === AppLibraryLayout.Grid}
-            onClick={() => setLayout(AppLibraryLayout.Grid)}
+        {conflict ? (
+          <div
+            role="alert"
+            className="space-y-2 rounded border border-destructive p-4"
           >
-            Grid view
-          </button>
-          <button
-            type="button"
-            className="rounded border px-3 py-2"
-            disabled={layoutLoading || layoutError}
-            aria-pressed={layout === AppLibraryLayout.List}
-            onClick={() => setLayout(AppLibraryLayout.List)}
-          >
-            List view
-          </button>
-        </div>
+            <p>
+              Layout changed in another browser. Your unsaved change was not
+              applied.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="min-h-10 rounded border px-3"
+                onClick={() => void reloadConflict()}
+              >
+                Load latest layout
+              </button>
+              <button
+                type="button"
+                className="min-h-10 rounded border px-3"
+                onClick={() => void reapplyConflict()}
+              >
+                Reapply my change
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <p role="status" className="text-sm">
+          {saveStatus === "saving" ? "Saving layout…" : ""}
+          {saveStatus === "saved" ? "Layout saved" : ""}
+          {saveStatus === "error" ? "Could not save layout" : ""}
+        </p>
+        <WorkspaceLayoutSettings
+          preferences={preferences}
+          layout={layout}
+          onUpdate={updateLauncher}
+          disabled={layoutLoading || layoutError || conflict}
+        />
         <div className="max-w-xs space-y-2">
           <h3 className="text-sm font-medium">Theme</h3>
           <ThemePreferenceRadio />

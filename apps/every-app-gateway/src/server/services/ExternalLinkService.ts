@@ -3,10 +3,10 @@ import { ExternalLinkRepository } from "@/server/repositories/ExternalLinkReposi
 import { PublicError } from "@/server/errors";
 import type { z } from "zod";
 import type {
-  externalLinkFormSchema,
+  organizationExternalLinkCreateSchema,
   externalLinkUpdateSchema,
 } from "@/schemas/externalLink";
-type Input = z.output<typeof externalLinkFormSchema>;
+type Input = z.output<typeof organizationExternalLinkCreateSchema>;
 type Update = z.output<typeof externalLinkUpdateSchema>;
 
 export const ExternalLinkService = {
@@ -34,6 +34,7 @@ export const ExternalLinkService = {
       name: data.name,
       url: data.url,
       access: data.access,
+      confirmedHostname: data.confirmedHostname,
     });
     if (!row) throw new PublicError("APP_NOT_FOUND", "External link not found");
     return row;

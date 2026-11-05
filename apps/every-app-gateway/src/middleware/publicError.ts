@@ -74,14 +74,14 @@ export const publicErrorMiddleware = createMiddleware({
       throw publicWireError("INVALID_INPUT", "Invalid request input");
     }
 
-    // Name, message and stack only: a thrown object (Better Auth's APIError,
-    // a failed fetch) can carry response headers or a body.
+    // Exception fields (including name, message, stack and stringification)
+    // are untrusted: even a fetch URL/query may be embedded in them. Log only
+    // fixed metadata and an independent identifier for operational correlation.
     logEvent(
       "server_fn.unhandled_error",
       {
-        name: error instanceof Error ? error.name : typeof error,
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
+        requestId: crypto.randomUUID(),
+        category: "unexpected_server_fn_error",
       },
       "error",
     );

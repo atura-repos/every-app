@@ -22,6 +22,7 @@ describe("external link persistence (migrated SQLite)", () => {
       organizationId: a,
       name: "Risk",
       url: "https://example.org/",
+      access: { everyone: true, userIds: [], groupIds: [] },
     });
     expect(
       (await ExternalLinkRepository.list(a, userA, false)).map(
@@ -36,11 +37,13 @@ describe("external link persistence (migrated SQLite)", () => {
       organizationId: a,
       name: "Risk",
       url: "https://example.org/",
+      access: { everyone: true, userIds: [], groupIds: [] },
     });
     expect(
       await ExternalLinkRepository.update(b, "link-a", {
         name: "Changed",
         url: "https://evil.example/",
+        confirmedHostname: "evil.example",
       }),
     ).toBeUndefined();
     expect(await ExternalLinkRepository.delete(b, "link-a")).toBeUndefined();
@@ -49,5 +52,57 @@ describe("external link persistence (migrated SQLite)", () => {
     );
     expect(await ExternalLinkRepository.delete(a, "link-a")).toBeDefined();
     expect(await ExternalLinkRepository.list(a, userA, false)).toEqual([]);
+  });
+  it("keeps an unsafe legacy URL on name edit but refuses replacing it with an unsafe destination", async () => {
+    const id = crypto.randomUUID();
+    await holder
+      .current!.insert((await import("@/db/schema")).externalLinks)
+      .values({
+        id,
+        organizationId: a,
+        name: "Old",
+        url: "https://example.org:8443/",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    await ExternalLinkRepository.update(a, id, {
+      name: "Renamed",
+      url: "https://example.org:8443/",
+      confirmedHostname: "example.org",
+    });
+    expect((await ExternalLinkRepository.list(a, userA, true))[0]?.name).toBe(
+      "Renamed",
+    );
+    await expect(
+      ExternalLinkRepository.update(a, id, {
+        name: "Wrong",
+        url: "https://example.org/?token=private-value",
+        confirmedHostname: "example.org",
+      }),
+    ).rejects.toThrow();
+    expect((await ExternalLinkRepository.list(a, userA, true))[0]?.url).toBe(
+      "https://example.org:8443/",
+    );
+    expect(await ExternalLinkRepository.delete(a, id)).toBeDefined();
+  });
+  it("requires explicit access and valid URL even for direct repository creates", async () => {
+    await expect(
+      ExternalLinkRepository.create({
+        id: "bad",
+        organizationId: a,
+        name: "Bad",
+        url: "https://example.org/?password=private-value",
+        access: { everyone: true, userIds: [], groupIds: [] },
+      }),
+    ).rejects.toThrow();
+    await expect(
+      ExternalLinkRepository.create({
+        id: "bad",
+        organizationId: a,
+        name: "Bad",
+        url: "https://example.org/",
+      } as Parameters<typeof ExternalLinkRepository.create>[0]),
+    ).rejects.toThrow();
+    expect(await ExternalLinkRepository.list(a, userA, true)).toEqual([]);
   });
 });

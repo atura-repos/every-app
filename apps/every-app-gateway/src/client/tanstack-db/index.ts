@@ -6,4 +6,3 @@ export { adminAppsCollection } from "./adminAppsCollection";
 export { refetchCollectionsAfterAuth } from "./cache-utils";
 export { forgetEverything, forgetEverythingButAuth } from "./forget";
 export { useQueryFailed } from "./useQueryFailed";
-export { useQueryPending } from "./useQueryPending";
