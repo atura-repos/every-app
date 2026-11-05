@@ -6,14 +6,6 @@ import { afterEach, expect, it, vi } from "vitest";
 import { PersonalLinks } from "./PersonalLinks";
 
 const state = vi.hoisted(() => ({ create: vi.fn() }));
-vi.mock("@/client/hooks/useSession", () => ({
-  useSession: () => ({
-    data: {
-      user: { id: "member-1" },
-      session: { activeOrganizationId: "org-1" },
-    },
-  }),
-}));
 vi.mock("@/serverFunctions/personalPortal", () => ({
   createPersonalLink: state.create,
   updatePersonalLink: vi.fn(),
@@ -38,7 +30,7 @@ it("focuses the add-link name after the form mounts for a delayed hash navigatio
     act(() =>
       root.render(
         <QueryClientProvider client={client}>
-          <PersonalLinks links={[]} />
+          <PersonalLinks links={[]} userId="member-1" orgId="org-1" />
         </QueryClientProvider>,
       ),
     );
