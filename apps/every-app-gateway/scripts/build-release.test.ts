@@ -263,6 +263,11 @@ describe("Atura release workflow guards", () => {
     ),
     "utf8",
   );
+  it("attributes both release note variants to the checked-out tag commit", () => {
+    expect(workflow).toContain('release_sha="$(git rev-parse HEAD)"');
+    expect(workflow.match(/Built from \$release_sha in atura-repos\/every-app/g)).toHaveLength(2);
+    expect(workflow).not.toContain("$GITHUB_SHA");
+  });
   it("defaults to an ordinary artifact and passes the opt-in to build and pack", () => {
     expect(workflow).toMatch(
       /staging_diagnostics:\s*\n[^]*?default: false\s*\n\s*type: boolean/,

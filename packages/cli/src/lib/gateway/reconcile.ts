@@ -33,7 +33,7 @@ import {
   type InstallRecord,
 } from "./install";
 import { acquireGatewayLease, LeasePurpose } from "./lease";
-import { refuseNewerThanCli, type GatewayRelease } from "./release";
+import { assertGatewayReleaseTarget, refuseNewerThanCli, type GatewayRelease } from "./release";
 
 interface ReconcileGatewayOptions {
   cf: CfRunner;
@@ -101,6 +101,7 @@ export async function reconcileGateway(
   // Before the lease: a build that misses the cache takes a minute or two.
   const release = await options.openRelease();
   try {
+    assertGatewayReleaseTarget(release, install.gatewayHost);
     refuseNewerThanCli(release.manifest, options.cliVersion);
     const lease = await acquireGatewayLease(
       {

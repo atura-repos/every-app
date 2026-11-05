@@ -27,6 +27,8 @@ import { reconcileGateway } from "./reconcile";
 import { openRelease, type GatewayRelease } from "./release";
 import { ensureGatewayResources } from "./resources";
 import { readRestorePoint } from "./restorePoints";
+import { deployGatewayRelease } from "@/commands/setup/deployGateway";
+import { DEFAULT_GATEWAY_NAMES } from "@every-app/perimeter/manifest";
 
 let account: FakeCloudflare;
 let tarball: string;
@@ -147,6 +149,68 @@ function seedApps(
 }
 
 describe("applyGateway", () => {
+  it("refuses a staging-only setup release before provisioning D1, KV or a queue", async () => {
+    Object.assign(release.manifest, { stagingOnly: { gatewayHost: "stage-apps.atura.nl", feature: "settings-diagnostics" } });
+    await expect(deployGatewayRelease({
+      cf: account.cf,
+      out: out(),
+      reason: "deploy",
+      release,
+      accountId: ACCOUNT_ID,
+      names: DEFAULT_GATEWAY_NAMES,
+      target: { domain: "apps.atura.nl", zone: { id: "zone-1", name: "atura.nl" }, appBaseDomain: "apps.atura.nl" },
+      interactive: false,
+    })).rejects.toMatchObject({ code: "RELEASE_TARGET_MISMATCH" });
+    expect(account.cf.calls).toEqual([]);
+    expect(account.databases.size).toBe(0);
+    expect(account.namespaces.size).toBe(0);
+    expect(account.queues.size).toBe(0);
+    expect(account.deploys).toHaveLength(0);
+  });
+
+  it("refuses a staging-only update before reading or changing resources", async () => {
+    Object.assign(release.manifest, { stagingOnly: { gatewayHost: "stage-apps.atura.nl", feature: "settings-diagnostics" } });
+    await expect(deployGatewayRelease({
+      cf: account.cf,
+      out: out(),
+      reason: "upgrade",
+      release,
+      accountId: ACCOUNT_ID,
+      names: DEFAULT_GATEWAY_NAMES,
+      target: { domain: "apps.atura.nl", zone: { id: "zone-1", name: "atura.nl" }, appBaseDomain: "apps.atura.nl" },
+      interactive: false,
+      existing: { databaseId: "existing-database" },
+    })).rejects.toMatchObject({ code: "RELEASE_TARGET_MISMATCH" });
+    expect(account.cf.calls).toEqual([]);
+    expect(account.databases.size).toBe(0);
+    expect(account.namespaces.size).toBe(0);
+    expect(account.queues.size).toBe(0);
+  });
+
+  it("refuses a staging-only reconcile before acquiring a lease or dropping secrets", async () => {
+    await deployGateway();
+    const callsBefore = account.cf.calls.length;
+    const deploysBefore = account.deploys.length;
+    const versionBefore = account.workers.get("every-app-gateway")!.versions[0];
+    await expect(reconcile({
+      force: true,
+      unsetSecrets: ["BETTER_AUTH_SECRET"],
+      openRelease: async () => {
+        const diagnostic = await openRelease(tarball);
+        Object.assign(diagnostic.manifest, { stagingOnly: { gatewayHost: "stage-apps.atura.nl", feature: "settings-diagnostics" } });
+        return diagnostic;
+      },
+    })).rejects.toMatchObject({ code: "RELEASE_TARGET_MISMATCH" });
+    expect(account.cf.calls.slice(callsBefore).filter((call) =>
+      call.args.some((arg) => /^(put|delete|create|apply|deploy)$/.test(arg)) ||
+      (call.args.slice(0, 2).join(" ") === "d1 query" &&
+        /CREATE|INSERT|UPDATE|DELETE/i.test(Object.values(call.files).join(" ")))
+    )).toEqual([]);
+    expect(gatewayDb().all("SELECT * FROM _everyapp_deploy_lease")).toEqual([]);
+    expect(account.workers.get("every-app-gateway")!.versions[0]).toBe(versionBefore);
+    expect(account.deploys).toHaveLength(deploysBefore);
+  });
+
   it("rejects a diagnostic release on production before any release write", async () => {
     Object.assign(release.manifest, { stagingOnly: { gatewayHost: "stage-apps.atura.nl", feature: "settings-diagnostics" } });
     await expect(deployGateway({ gatewayHost: "apps.atura.nl" })).rejects.toMatchObject({ code: "RELEASE_TARGET_MISMATCH" });

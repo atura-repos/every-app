@@ -83,6 +83,17 @@ export interface GatewayRelease {
   cleanup(): Promise<void>;
 }
 
+/** Reject a diagnostic release before provisioning, leasing or changing any live state. */
+export function assertGatewayReleaseTarget(release: GatewayRelease, gatewayHost: string): void {
+  const stage = release.manifest.stagingOnly;
+  if (stage && gatewayHost !== stage.gatewayHost) {
+    throw new EveryAppError(
+      "RELEASE_TARGET_MISMATCH",
+      `This staging-only diagnostic release can only be installed at ${stage.gatewayHost}, not ${gatewayHost}.`,
+    );
+  }
+}
+
 /** Where a release came from, as setup and the downgrade guard say it. */
 export type ReleaseOrigin =
   | { kind: "checkout" }

@@ -84,10 +84,11 @@ jobs:
             echo "Release $TAG exists; refusing to overwrite immutable assets" >&2
             exit 1
           fi
+          release_sha="$(git rev-parse HEAD)"
           if [[ "$ATURA_STAGE_DIAGNOSTICS" == true ]]; then
-            notes="STAGING ONLY diagnostic build for https://stage-apps.atura.nl. NEVER deploy to production. release.json contains stagingOnly; this release's CLI refuses other Gateway hosts. Built from $GITHUB_SHA in atura-repos/every-app. This workflow never deploys to Cloudflare."
+            notes="STAGING ONLY diagnostic build for https://stage-apps.atura.nl. NEVER deploy to production. release.json contains stagingOnly; this release's CLI refuses other Gateway hosts. Built from $release_sha in atura-repos/every-app. This workflow never deploys to Cloudflare."
           else
-            notes="Ordinary release without staging diagnostics. Built from $GITHUB_SHA in atura-repos/every-app. Deploy explicitly with the Atura checkout or Gateway tarball. This workflow never deploys to Cloudflare."
+            notes="Ordinary release without staging diagnostics. Built from $release_sha in atura-repos/every-app. Deploy explicitly with the Atura checkout or Gateway tarball. This workflow never deploys to Cloudflare."
           fi
           gh release create "$TAG" release-assets/* \
             --verify-tag --prerelease --title "Atura Gateway and CLI $TAG" \

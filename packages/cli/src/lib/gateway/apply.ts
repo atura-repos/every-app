@@ -76,6 +76,7 @@ import { readInstall, writeInstall, type InstallRecord } from "./install";
 import { acquireGatewayLease, LeasePurpose, type Lease } from "./lease";
 import { gatewayDomains, patchGatewayBuildOutput } from "./patchBuildOutput";
 import {
+  assertGatewayReleaseTarget,
   compareReleaseOrder,
   describeOrigin,
   type CandidateRelease,
@@ -313,12 +314,7 @@ export async function applyGateway(
   options: ApplyGatewayOptions,
 ): Promise<ApplyGatewayResult> {
   const { cf, reason, release, db } = options;
-  if (release.manifest.stagingOnly && options.gatewayHost !== release.manifest.stagingOnly.gatewayHost) {
-    throw new EveryAppError(
-      "RELEASE_TARGET_MISMATCH",
-      `This staging-only diagnostic release can only be installed at ${release.manifest.stagingOnly.gatewayHost}, not ${options.gatewayHost}.`,
-    );
-  }
+  assertGatewayReleaseTarget(release, options.gatewayHost);
   const ownLease = options.heldLease
     ? null
     : await acquireGatewayLease(options, GATEWAY_LEASE_PURPOSES[reason]);
