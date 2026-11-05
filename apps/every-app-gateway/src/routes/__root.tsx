@@ -13,6 +13,7 @@ import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client
 import * as React from "react";
 import appCss from "@/client/styles/app.css?url";
 import { queryClient, persister, CACHE_BUSTER } from "@/client/tanstack-db";
+import { gatewayPersistOptions } from "@/client/tanstack-db/persister";
 import {
   themePreferenceInitScript,
   useResolvedTheme,
@@ -110,17 +111,11 @@ function RootComponent() {
       client={queryClient}
       persistOptions={{
         persister,
+        ...gatewayPersistOptions,
         // A cached server-function answer is only the shape the build that
         // wrote it returned: a restored list renders before its refetch, so
         // one from an older build would reach a page that reads newer fields.
         buster: `${CACHE_BUSTER}:${__GATEWAY_BUILD__}`,
-        dehydrateOptions: {
-          // The default (successful queries only), minus any query with
-          // `meta: { persist: false }`, which stays in memory: the invite
-          // link lookup keys on the link's secret.
-          shouldDehydrateQuery: (query) =>
-            query.state.status === "success" && query.meta?.persist !== false,
-        },
       }}
     >
       <TooltipProvider>
