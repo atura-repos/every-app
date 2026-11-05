@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "@tanstack/react-router";
 import { Bookmark, Link2, Pin, PinOff, ArrowUpRight } from "lucide-react";
 import { AppListItem } from "./AppListItem";
 import { AppLibraryLayout } from "@/client/hooks/useAppLibrary";
@@ -9,11 +8,7 @@ import {
   type LauncherKind,
   type LauncherSource,
 } from "@/client/lib/launcherItems";
-import {
-  moveLauncherItem,
-  removeCollection,
-  resetLauncher,
-} from "@/client/lib/launcherLayout";
+import { moveLauncherItem } from "@/client/lib/launcherLayout";
 import type { PortalPreferences } from "@/server/repositories/PersonalPortalRepository";
 import type { UserAccessApp } from "@/types/app";
 import type { personalLinks, externalLinks } from "@/db/schema";
@@ -46,7 +41,6 @@ export function LauncherView({
   const [search, setSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState<"all" | "pinned" | LauncherKind>("all");
-  const [name, setName] = useState("");
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
@@ -254,6 +248,12 @@ export function LauncherView({
         <span className="text-sm text-muted-foreground">
           Only for me in this workspace
         </span>
+        <a
+          href="/settings#home-layout"
+          className="min-h-10 rounded border px-3 py-2 text-sm"
+        >
+          Manage layout and collections
+        </a>
       </div>
       <label className="block max-w-sm text-sm">
         Search name or description{" "}
@@ -271,31 +271,6 @@ export function LauncherView({
           className="mt-1 w-full rounded border bg-card p-2"
         />
       </label>
-      <div
-        role="group"
-        aria-label="App layout"
-        className="flex flex-wrap gap-2"
-      >
-        {([AppLibraryLayout.Grid, AppLibraryLayout.List] as const).map(
-          (view) => (
-            <button
-              key={view}
-              type="button"
-              aria-pressed={layout === view}
-              onClick={() =>
-                onUpdate((current) =>
-                  current.layout === view
-                    ? current
-                    : { ...current, layout: view },
-                )
-              }
-              className="min-h-10 rounded border px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2"
-            >
-              {view === AppLibraryLayout.Grid ? "Grid view" : "List view"}
-            </button>
-          ),
-        )}
-      </div>
       <button
         type="button"
         onClick={() => setSearch("")}
@@ -367,90 +342,6 @@ export function LauncherView({
           )}
         </section>
       ))}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          const trimmed = name.trim();
-          if (!trimmed || (preferences.collections ?? []).length >= 20) return;
-          update(
-            (current) => ({
-              ...current,
-              collections: [
-                ...(current.collections ?? []),
-                { id: crypto.randomUUID(), name: trimmed },
-              ],
-            }),
-            "Collection added",
-          );
-          setName("");
-        }}
-        className="flex flex-wrap gap-2"
-      >
-        <label>
-          New collection{" "}
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={64}
-            className="rounded border bg-card p-2"
-          />
-        </label>
-        <button type="submit" className="rounded border px-3">
-          Add collection
-        </button>
-      </form>
-      {(preferences.collections ?? []).map((c) => (
-        <div key={c.id} className="flex flex-wrap gap-2 text-sm">
-          <span>{c.name}</span>
-          <button
-            type="button"
-            onClick={() => {
-              const next = window.prompt("Collection name", c.name)?.trim();
-              if (next && next.length <= 64)
-                update(
-                  (p) => ({
-                    ...p,
-                    collections: (p.collections ?? []).map((x) =>
-                      x.id === c.id ? { ...x, name: next } : x,
-                    ),
-                  }),
-                  "Collection renamed",
-                );
-            }}
-            className="rounded border px-2"
-          >
-            Rename
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (
-                window.confirm(
-                  `Delete ${c.name}? Items return to Other; pins stay.`,
-                )
-              )
-                update((p) => removeCollection(p, c.id), "Collection removed");
-            }}
-            className="rounded border px-2"
-          >
-            Delete
-          </button>
-        </div>
-      ))}
-      <button
-        type="button"
-        className="rounded border px-3 py-2 text-sm"
-        onClick={() => {
-          if (
-            window.confirm(
-              "Reset your pins, order, collections and layout? Your links and Atura publications stay.",
-            )
-          )
-            update(resetLauncher, "Layout reset");
-        }}
-      >
-        Reset layout
-      </button>
     </div>
   );
 }

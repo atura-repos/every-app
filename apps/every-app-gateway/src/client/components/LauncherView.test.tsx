@@ -36,6 +36,10 @@ it("takes a member directly to the personal link form", () => {
     a.textContent?.includes("Add my own link"),
   );
   expect(add?.getAttribute("href")).toBe("/settings#add-personal-link");
+  const settings = [...container.querySelectorAll("a")].find((a) =>
+    a.textContent?.includes("Manage layout and collections"),
+  );
+  expect(settings?.getAttribute("href")).toBe("/settings#home-layout");
   act(() => root.unmount());
 });
 it("shows a single combined result count and never matches a private URL", () => {
@@ -59,6 +63,11 @@ it("shows a single combined result count and never matches a private URL", () =>
   };
   act(() => root.render(<LauncherView {...(props as any)} />));
   expect(container.textContent).toContain("3 items");
+  expect(container.textContent).not.toContain("Add collection");
+  expect(container.textContent).not.toContain("Reset layout");
+  expect(
+    container.querySelector('[role="group"][aria-label="App layout"]'),
+  ).toBeNull();
   expect(container.querySelector("li li")).toBeNull();
   const search = container.querySelector('input[type="search"]')!;
   act(() => {
@@ -161,7 +170,7 @@ it("announces confirmed save, conflict and failure without a permanent requested
   act(() => root.unmount());
 });
 
-it("offers keyboard-operable grid/list controls and restores a saved legacy list on remount", () => {
+it("renders the saved layout without duplicating its settings on the home page", () => {
   const container = document.createElement("div");
   let root = createRoot(container);
   let saved = {
@@ -194,23 +203,10 @@ it("offers keyboard-operable grid/list controls and restores a saved legacy list
     [...container.querySelectorAll("button")].find(
       (b) => b.textContent?.trim() === name,
     )!;
-  expect(button("List view").getAttribute("aria-pressed")).toBe("true");
+  expect(button("List view")).toBeUndefined();
   expect(
     container.querySelector('section[aria-label="Pinned"] ul')?.className,
   ).not.toContain("md:grid-cols-2");
-  act(() => {
-    button("Grid view").focus();
-    button("Grid view").click();
-  });
-  expect(saved).toMatchObject({
-    layout: "grid",
-    revision: 3,
-    pinnedIds: ["a"],
-  });
-  expect(button("Grid view").getAttribute("aria-pressed")).toBe("true");
-  expect(
-    container.querySelector('section[aria-label="Pinned"] ul')?.className,
-  ).toContain("md:grid-cols-2");
   act(() => root.unmount());
   root = createRoot(container);
   act(() =>
@@ -220,8 +216,7 @@ it("offers keyboard-operable grid/list controls and restores a saved legacy list
       />,
     ),
   );
-  expect(button("Grid view").getAttribute("aria-pressed")).toBe("true");
-  act(() => button("List view").click());
+  expect(button("Grid view")).toBeUndefined();
   expect(saved.layout).toBe("list");
   act(() => root.unmount());
 });
