@@ -22,9 +22,15 @@ const gatewayBuild = (() => {
   }
 })();
 
-export default defineConfig(({ isPreview }) => ({
+export default defineConfig(({ isPreview, mode }) => ({
   define: {
     __GATEWAY_BUILD__: JSON.stringify(gatewayBuild),
+    // False in every ordinary production release. A separately authorized
+    // staging diagnostic build requires this explicit build-time opt-in;
+    // the UI additionally checks the exact staging origin at runtime.
+    __ATURA_STAGE_DIAGNOSTICS__: JSON.stringify(
+      mode === "production" && process.env.ATURA_STAGE_DIAGNOSTICS === "true",
+    ),
   },
   server: {
     // `cf dev` forwards no port flag; PORT picks another port.

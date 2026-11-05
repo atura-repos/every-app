@@ -13,7 +13,7 @@ import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client
 import * as React from "react";
 import appCss from "@/client/styles/app.css?url";
 import { queryClient, persister, CACHE_BUSTER } from "@/client/tanstack-db";
-import { shouldPersistQuery } from "@/client/tanstack-db/persister";
+import { gatewayPersistOptions } from "@/client/tanstack-db/persister";
 import {
   themePreferenceInitScript,
   useResolvedTheme,
@@ -21,6 +21,7 @@ import {
 } from "@/client/lib/theme";
 import { TooltipProvider } from "@/client/components/ui/tooltip";
 import { FloatingBuildStamp } from "@/client/components/BuildStamp";
+import { settingsDiagnosticEnabled } from "@/client/components/settingsDiagnosticGate";
 import { Toaster } from "sonner";
 
 const PUBLIC_ROUTES = [
@@ -41,7 +42,35 @@ const PUBLIC_ROUTES = [
 function AppRouter() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { data: session, isPending } = useSession();
+  const sessionObserver = useSession();
+  const { data: session, isPending } = sessionObserver;
+  const [DiagnosticPanel, setDiagnosticPanel] = React.useState<
+    | (typeof import("@/client/components/SettingsDiagnostics"))["SettingsDiagnostics"]
+    | null
+  >(null);
+  useEffect(() => {
+    if (!__ATURA_STAGE_DIAGNOSTICS__ || typeof window === "undefined") return;
+    // Load diagnostics only on this origin/path and by explicit operator opt-in.
+    if (
+      !settingsDiagnosticEnabled(
+        window.location.origin,
+        location.pathname,
+        window.location.search,
+      )
+    ) {
+      setDiagnosticPanel(null);
+      return;
+    }
+    let mounted = true;
+    void import("@/client/components/SettingsDiagnostics").then(
+      ({ SettingsDiagnostics }) => {
+        if (mounted) setDiagnosticPanel(() => SettingsDiagnostics);
+      },
+    );
+    return () => {
+      mounted = false;
+    };
+  }, [location.pathname, location.searchStr]);
   // Keeps data-theme in step with the OS and the account menu's pick on
   // every page, not only while the menu is open.
   useThemePreference();
@@ -62,7 +91,12 @@ function AppRouter() {
     }
   }, [session, isPending, navigate, location.pathname, location.searchStr]);
 
-  return <Outlet />;
+  return (
+    <>
+      {DiagnosticPanel ? <DiagnosticPanel session={sessionObserver} /> : null}
+      <Outlet />
+    </>
+  );
 }
 
 // Root component that wraps everything with the QueryClientProvider and providers
@@ -77,15 +111,11 @@ function RootComponent() {
       client={queryClient}
       persistOptions={{
         persister,
+        ...gatewayPersistOptions,
         // A cached server-function answer is only the shape the build that
         // wrote it returned: a restored list renders before its refetch, so
         // one from an older build would reach a page that reads newer fields.
         buster: `${CACHE_BUSTER}:${__GATEWAY_BUILD__}`,
-        dehydrateOptions: {
-          // Never store ACL-sensitive lists or preferences, including older
-          // callers that forgot to opt out with query metadata.
-          shouldDehydrateQuery: shouldPersistQuery,
-        },
       }}
     >
       <TooltipProvider>

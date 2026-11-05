@@ -4,6 +4,7 @@
 // Build stamp injected by vite `define` (see vite.config.ts); rendered as the
 // bottom-right version badge in __root.tsx.
 declare const __GATEWAY_BUILD__: string;
+declare const __ATURA_STAGE_DIAGNOSTICS__: boolean;
 
 declare namespace Cloudflare {
   interface Env {

@@ -31,6 +31,11 @@ export function shouldPersistQuery(query: {
   );
 }
 
+/** Shared by the provider and the persistence regression test. */
+export const gatewayPersistOptions = {
+  dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
+};
+
 export const persister = createSyncStoragePersister({
   storage: typeof window !== "undefined" ? window.localStorage : undefined,
   key: QUERY_CACHE_KEY,
